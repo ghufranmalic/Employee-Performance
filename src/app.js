@@ -11,6 +11,11 @@ const KPI_TABS = [
 ];
 
 const ACTUAL_DATA_KPI_IDS = new Set(["sales", "quality", "rt", "tnd", "coins"]);
+const AUTH_STORAGE_KEY = "employee-performance-authenticated";
+const AUTH_USERS = {
+  user1: "9f37f577aad6b6518ea0685b3b96cc94dec6ebb8c66914588cc108ed4ea14e4b",
+  user2: "5c3cfda21b1fd485dbef4c03d224c4dd4ef1653e4fdc555af54bac39c8c233f0"
+};
 
 const META_TABS = {
   employees: "Employee List",
@@ -25,10 +30,18 @@ const state = {
   months: [],
   selectedUser: "",
   annualAutoRange: true,
+  dashboardStarted: false,
   diagnostics: []
 };
 
 const els = {
+  app: document.querySelector("#app"),
+  loginPage: document.querySelector("#loginPage"),
+  loginForm: document.querySelector("#loginForm"),
+  loginUsername: document.querySelector("#loginUsername"),
+  loginPassword: document.querySelector("#loginPassword"),
+  loginError: document.querySelector("#loginError"),
+  logoutBtn: document.querySelector("#logoutBtn"),
   sheetUrl: document.querySelector("#sheetUrl"),
   controls: document.querySelector("#controls"),
   loadBtn: document.querySelector("#loadBtn"),
@@ -57,9 +70,17 @@ const els = {
   refreshEvaluationRange: document.querySelector("#refreshEvaluationRange")
 };
 
-els.sheetUrl.value = DEFAULT_SHEET_URL;
-setEmptyControls();
-loadSheet(DEFAULT_SHEET_URL);
+initializeAuth();
+
+els.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await handleLogin();
+});
+
+els.logoutBtn.addEventListener("click", () => {
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  showLogin();
+});
 
 els.controls.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -112,6 +133,59 @@ els.annualEndMonth.addEventListener("change", () => {
   state.annualAutoRange = false;
   renderAnnualEvaluation();
 });
+
+function initializeAuth() {
+  if (sessionStorage.getItem(AUTH_STORAGE_KEY) === "true") {
+    showDashboard();
+    return;
+  }
+  showLogin();
+}
+
+function showLogin() {
+  els.loginPage.classList.remove("auth-hidden");
+  els.app.classList.add("auth-hidden");
+  els.loginPassword.value = "";
+  els.loginError.textContent = "";
+  window.setTimeout(() => els.loginUsername.focus(), 0);
+}
+
+function showDashboard() {
+  els.loginPage.classList.add("auth-hidden");
+  els.app.classList.remove("auth-hidden");
+  startDashboard();
+}
+
+function startDashboard() {
+  if (state.dashboardStarted) return;
+  state.dashboardStarted = true;
+  els.sheetUrl.value = DEFAULT_SHEET_URL;
+  setEmptyControls();
+  loadSheet(DEFAULT_SHEET_URL);
+}
+
+async function handleLogin() {
+  const username = normalizeUser(els.loginUsername.value);
+  const password = els.loginPassword.value;
+  const expectedHash = AUTH_USERS[username];
+  const actualHash = await sha256(password);
+
+  if (expectedHash && actualHash === expectedHash) {
+    sessionStorage.setItem(AUTH_STORAGE_KEY, "true");
+    showDashboard();
+    return;
+  }
+
+  els.loginError.textContent = "Invalid username or password.";
+  els.loginPassword.value = "";
+  els.loginPassword.focus();
+}
+
+async function sha256(value) {
+  const bytes = new TextEncoder().encode(value);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 async function loadSheet(url) {
   const sheetId = extractSheetId(url);

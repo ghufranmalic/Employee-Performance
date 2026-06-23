@@ -11,13 +11,32 @@
     <link rel="stylesheet" href="./src/styles.css?v=20260623-lighter-type" />
   </head>
   <body>
-    <div id="app">
+    <section id="loginPage" class="login-page">
+      <form id="loginForm" class="login-card">
+        <p class="brand-word">EMPLOYEE PROFILE</p>
+        <h1>Sign in</h1>
+        <p class="muted">Enter your dashboard credentials.</p>
+        <label class="field">
+          <span>Username</span>
+          <input id="loginUsername" type="text" autocomplete="username" />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="loginPassword" type="password" autocomplete="current-password" />
+        </label>
+        <p id="loginError" class="login-error" role="alert"></p>
+        <button class="primary-btn" type="submit">Login</button>
+      </form>
+    </section>
+
+    <div id="app" class="auth-hidden">
       <aside class="sidebar">
         <div class="brand">
           <div>
             <p class="brand-word">EMPLOYEE PROFILE</p>
             <h1>Employee Performance</h1>
           </div>
+          <button id="logoutBtn" class="logout-btn" type="button">Logout</button>
         </div>
 
         <form id="controls" class="controls">
@@ -182,6 +201,6 @@
       </article>
     </template>
 
-    <script type="module" src="./src/app.js?v=20260623-latest-real-kpi-month"></script>
+    <script type="module" src="./src/app.js?v=20260623-login-gate"></script>
   </body>
 </html>

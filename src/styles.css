@@ -39,6 +39,47 @@ button {
   cursor: pointer;
 }
 
+.auth-hidden {
+  display: none !important;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: var(--paper);
+}
+
+.login-card {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 28px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.login-card h1 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.login-card .muted {
+  margin-top: -8px;
+}
+
+.login-error {
+  min-height: 20px;
+  margin: -4px 0 0;
+  color: var(--red);
+  font-size: 13px;
+}
+
 #app {
   display: grid;
   grid-template-columns: minmax(300px, 360px) 1fr;
@@ -57,7 +98,21 @@ button {
 }
 
 .brand {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 28px;
+}
+
+.logout-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--primary);
+  background: #f1edff;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .brand h1,
