@@ -1,0 +1,1140 @@
+const DEFAULT_SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/18o6MwnT0vfyMIV3hm4lKHu6gtpE2Glsivv_LnyR2jO0/edit?gid=890066547#gid=890066547";
+
+const KPI_TABS = [
+  { id: "sales", label: "Sales", sheet: "Sales", color: "#4b8dff", unit: "count", aggregate: "sum", targetPerMonth: 600 },
+  { id: "dependability", label: "Dependability", sheet: "Dependability", color: "#8d5cff", unit: "percent", aggregate: "average", overallWeight: 0.10 },
+  { id: "quality", label: "Chat Quality", sheet: "Quality", color: "#a64dff", unit: "percent", aggregate: "average", overallWeight: 0.30 },
+  { id: "rt", label: "Response Time", sheet: "RT", color: "#4b8dff", unit: "percent", aggregate: "average", overallWeight: 0.30 },
+  { id: "tnd", label: "T&D Score", sheet: "TnD", color: "#155dff", unit: "percent", aggregate: "average", overallWeight: 0.30 },
+  { id: "coins", label: "Gold Coins", sheet: "Gold Coins", color: "#f7b733", unit: "count", aggregate: "sum", targetPerMonth: 330 }
+];
+
+const ACTUAL_DATA_KPI_IDS = new Set(["sales", "quality", "rt", "tnd", "coins"]);
+
+const META_TABS = {
+  employees: "Employee List",
+  teams: "Team"
+};
+
+const state = {
+  sheetId: "",
+  kpis: new Map(),
+  employees: new Map(),
+  teams: new Map(),
+  months: [],
+  selectedUser: "",
+  annualAutoRange: true,
+  diagnostics: []
+};
+
+const els = {
+  sheetUrl: document.querySelector("#sheetUrl"),
+  controls: document.querySelector("#controls"),
+  loadBtn: document.querySelector("#loadBtn"),
+  employeeInput: document.querySelector("#employeeInput"),
+  employeeOptions: document.querySelector("#employeeOptions"),
+  startMonth: document.querySelector("#startMonth"),
+  endMonth: document.querySelector("#endMonth"),
+  statusText: document.querySelector("#statusText"),
+  statusTitle: document.querySelector(".status-title"),
+  employeeName: document.querySelector("#employeeName"),
+  employeeMeta: document.querySelector("#employeeMeta"),
+  scoreValue: document.querySelector("#scoreValue"),
+  summaryGrid: document.querySelector("#summaryGrid"),
+  insightList: document.querySelector("#insightList"),
+  rangeTitle: document.querySelector("#rangeTitle"),
+  coverageText: document.querySelector("#coverageText"),
+  chartsGrid: document.querySelector("#chartsGrid"),
+  downloadReport: document.querySelector("#downloadReport"),
+  downloadCsv: document.querySelector("#downloadCsv"),
+  evaluationInputs: document.querySelector("#evaluationInputs"),
+  addEvaluationUser: document.querySelector("#addEvaluationUser"),
+  evaluationTableBody: document.querySelector("#evaluationTableBody"),
+  downloadEvaluationPdf: document.querySelector("#downloadEvaluationPdf"),
+  annualStartMonth: document.querySelector("#annualStartMonth"),
+  annualEndMonth: document.querySelector("#annualEndMonth"),
+  refreshEvaluationRange: document.querySelector("#refreshEvaluationRange")
+};
+
+els.sheetUrl.value = DEFAULT_SHEET_URL;
+setEmptyControls();
+loadSheet(DEFAULT_SHEET_URL);
+
+els.controls.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadSheet(els.sheetUrl.value.trim());
+});
+
+els.employeeInput.addEventListener("change", selectTypedEmployee);
+els.employeeInput.addEventListener("blur", selectTypedEmployee);
+els.employeeInput.addEventListener("input", selectExactEmployee);
+els.employeeInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    selectTypedEmployee();
+  }
+});
+
+els.startMonth.addEventListener("change", () => {
+  setActiveRangeButton("");
+  renderDashboard();
+});
+els.endMonth.addEventListener("change", () => {
+  setActiveRangeButton("");
+  renderDashboard();
+});
+
+document.querySelectorAll("[data-range]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-range]").forEach((item) => item.classList.remove("active"));
+    button.classList.add("active");
+    const range = button.dataset.range === "all" ? "all" : Number(button.dataset.range);
+    setDefaultRange(range);
+    renderDashboard();
+  });
+});
+
+els.downloadReport.addEventListener("click", downloadReport);
+els.downloadCsv.addEventListener("click", downloadCsv);
+els.addEvaluationUser.addEventListener("click", () => addEvaluationField());
+els.downloadEvaluationPdf.addEventListener("click", downloadEvaluationPdf);
+els.refreshEvaluationRange.addEventListener("click", () => {
+  state.annualAutoRange = true;
+  resetAnnualRange();
+  renderAnnualEvaluation();
+});
+els.annualStartMonth.addEventListener("change", () => {
+  state.annualAutoRange = false;
+  renderAnnualEvaluation();
+});
+els.annualEndMonth.addEventListener("change", () => {
+  state.annualAutoRange = false;
+  renderAnnualEvaluation();
+});
+
+async function loadSheet(url) {
+  const sheetId = extractSheetId(url);
+  if (!sheetId) {
+    setStatus("Could not read Sheet URL", "Paste a valid Google Sheets URL that includes /d/{sheet-id}/.");
+    return;
+  }
+
+  setStatus("Loading", "Reading KPI tabs from Google Sheets...");
+  els.loadBtn.disabled = true;
+  state.sheetId = sheetId;
+  state.kpis.clear();
+  state.employees.clear();
+  state.teams.clear();
+  state.months = [];
+  state.diagnostics = [];
+
+  try {
+    await Promise.all(KPI_TABS.map((tab) => loadKpiTab(sheetId, tab)));
+    await loadEmployeeMeta(sheetId);
+    await loadTeamMeta(sheetId);
+    buildEmployeeOptions();
+    buildMonthOptions();
+    initializeEvaluationInputs();
+    setDefaultRange(12);
+    renderDashboard();
+    renderAnnualEvaluation();
+    const warnings = state.diagnostics.length ? ` ${state.diagnostics.join(" ")}` : "";
+    setStatus("Loaded", `Found ${state.employees.size} employees and ${state.months.length} month columns.${warnings}`);
+  } catch (error) {
+    setStatus("Load failed", friendlyError(error));
+  } finally {
+    els.loadBtn.disabled = false;
+  }
+}
+
+async function loadKpiTab(sheetId, tab) {
+  try {
+    const table = await querySheet(sheetId, tab.sheet);
+    const rows = tableToRows(table);
+    const metricRows = new Map();
+
+    rows.forEach((row) => {
+      const username = normalizeUser(row.values[0]);
+      if (!username) return;
+      ensureEmployee(username).username = row.values[0];
+      metricRows.set(username, extractSeries(row.headers, row.values, tab));
+    });
+
+    state.kpis.set(tab.id, metricRows);
+  } catch (error) {
+    state.diagnostics.push(`${tab.label} tab was not readable.`);
+    state.kpis.set(tab.id, new Map());
+  }
+}
+
+async function loadEmployeeMeta(sheetId) {
+  try {
+    const table = await querySheet(sheetId, META_TABS.employees);
+    const rows = tableToRows(table);
+    rows.forEach((row) => {
+      const username = normalizeUser(row.values[0]);
+      if (!username) return;
+      const employee = ensureEmployee(username);
+      row.headers.forEach((header, index) => {
+        const key = normalizeHeader(header);
+        const value = cleanCell(row.values[index]);
+        if (!value) return;
+        if (index === 0) employee.username = value;
+        if (key.includes("name") && !key.includes("user")) employee.name = value;
+        if (key.includes("emp") && key.includes("type")) employee.empType = value;
+        if (key.includes("shift")) employee.shiftType = value;
+        if (key.includes("level")) employee.level = value;
+        if (key.includes("designation") || key.includes("role")) employee.designation = value;
+        if (key.includes("team")) employee.team = value;
+      });
+    });
+  } catch (error) {
+    state.diagnostics.push("Employee List tab was not readable.");
+  }
+}
+
+async function loadTeamMeta(sheetId) {
+  try {
+    const table = await querySheet(sheetId, META_TABS.teams);
+    const rows = tableToRows(table);
+    rows.forEach((row) => {
+      const username = normalizeUser(row.values[0]);
+      if (!username) return;
+      const currentTeam = currentTeamValue(row.headers, row.values);
+      if (currentTeam) {
+        state.teams.set(username, currentTeam);
+        ensureEmployee(username).team = currentTeam;
+      }
+    });
+  } catch (error) {
+    state.diagnostics.push("Team tab is not available yet.");
+  }
+}
+
+function querySheet(sheetId, sheetName) {
+  const callbackName = `sheetCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const params = new URLSearchParams({
+    sheet: sheetName,
+    headers: "1",
+    tq: "select *",
+    tqx: `out:json;responseHandler:${callbackName}`
+  });
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?${params.toString()}`;
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out while reading ${sheetName}`));
+    }, 30000);
+
+    window[callbackName] = (response) => {
+      cleanup();
+      if (response.status === "error") {
+        const detail = response.errors && response.errors[0] ? response.errors[0].detailed_message || response.errors[0].message : "Unknown sheet error";
+        reject(new Error(detail));
+      } else {
+        resolve(response.table);
+      }
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error(`Could not load ${sheetName}`));
+    };
+    script.src = url;
+    document.head.append(script);
+
+    function cleanup() {
+      window.clearTimeout(timer);
+      delete window[callbackName];
+      script.remove();
+    }
+  });
+}
+
+function tableToRows(table) {
+  const headers = table.cols.map((column, index) => column.label || column.id || `Column ${index + 1}`);
+
+  return table.rows.map((row) => {
+    const values = headers.map((_, colIndex) => {
+      const cell = row.c[colIndex];
+      if (!cell) return "";
+      return cell.v === null || cell.v === undefined || cell.v === "" ? cell.f : cell.v;
+    });
+    return { headers, values };
+  }).filter((row) => row.values.some((value) => cleanCell(value)));
+}
+
+function extractSeries(headers, values, tab) {
+  return headers.slice(1).map((header, index) => {
+    const month = parseMonth(header);
+    const value = parseMetric(values[index + 1], tab.unit);
+    if (!month || value === null) return null;
+    addMonth(month);
+    return { month: month.key, label: month.label, value };
+  }).filter(Boolean).sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function buildEmployeeOptions() {
+  const usernames = new Set();
+  state.kpis.forEach((rows) => rows.forEach((_, username) => usernames.add(username)));
+  usernames.forEach((username) => ensureEmployee(username));
+
+  const employees = [...state.employees.values()].sort((a, b) => displayName(a).localeCompare(displayName(b)));
+  els.employeeOptions.innerHTML = "";
+  employees.forEach((employee) => {
+    const option = document.createElement("option");
+    option.value = employee.username;
+    option.label = displayName(employee) === employee.username ? employee.username : `${displayName(employee)} (${employee.username})`;
+    els.employeeOptions.append(option);
+  });
+
+  state.selectedUser = employees[0] ? normalizeUser(employees[0].username) : "";
+  els.employeeInput.value = employees[0] ? employees[0].username : "";
+}
+
+function buildMonthOptions() {
+  state.months.sort((a, b) => a.key.localeCompare(b.key));
+  const months = selectableMonths();
+  [els.startMonth, els.endMonth, els.annualStartMonth, els.annualEndMonth].forEach((select) => {
+    select.innerHTML = "";
+    months.forEach((month) => {
+      const option = document.createElement("option");
+      option.value = month.key;
+      option.textContent = month.label;
+      select.append(option);
+    });
+  });
+}
+
+function setDefaultRange(size) {
+  const months = selectableMonths();
+  if (!months.length) return;
+  const available = dataMonthsForEmployee(state.selectedUser);
+  const source = available.length ? available : months;
+  const end = source[source.length - 1];
+  const start = size === "all" ? source[0] : source[Math.max(0, source.length - size)];
+  els.startMonth.value = start.key;
+  els.endMonth.value = end.key;
+}
+
+function renderDashboard() {
+  if (!state.selectedUser || !state.months.length) {
+    renderEmpty();
+    return;
+  }
+
+  const employee = state.employees.get(state.selectedUser) || { username: state.selectedUser };
+  const range = getRange();
+  const summaries = KPI_TABS.map((tab) => summarizeKpi(tab, state.selectedUser, range));
+  const score = calculateScore(summaries);
+
+  els.employeeName.textContent = displayName(employee);
+  els.employeeMeta.textContent = buildMetaLine(employee);
+  els.scoreValue.textContent = score === null ? "--" : `${formatScore(score)}%`;
+  els.rangeTitle.textContent = `${monthLabel(range.start)} to ${monthLabel(range.end)}`;
+  els.coverageText.textContent = `${summaries.filter((item) => item.points.length).length} of ${KPI_TABS.length} KPIs have data in this range.`;
+
+  renderSummaryCards(summaries);
+  renderInsights(summaries);
+  renderCharts(summaries);
+}
+
+function renderSummaryCards(summaries) {
+  els.summaryGrid.innerHTML = "";
+  const template = document.querySelector("#metricCardTemplate");
+  summaries.forEach((summary) => {
+    const node = template.content.firstElementChild.cloneNode(true);
+    node.querySelector(".metric-dot").style.background = summary.tab.color;
+    node.querySelector(".metric-head p").textContent = summary.tab.label;
+    node.querySelector("strong").textContent = formatValue(summary.rangeValue, summary.tab.unit);
+    node.querySelector("small").textContent = summary.points.length
+      ? `${summary.rangeLabel} across ${summary.points.length} month${summary.points.length === 1 ? "" : "s"}`
+      : "No values in selected range";
+    els.summaryGrid.append(node);
+  });
+}
+
+function renderInsights(summaries) {
+  const valid = summaries.filter((summary) => summary.points.length);
+  const best = [...valid].sort((a, b) => b.scoreValue - a.scoreValue)[0];
+  const needsAttention = [...valid].sort((a, b) => a.scoreValue - b.scoreValue)[0];
+  const improved = [...valid].sort((a, b) => b.delta - a.delta)[0];
+  const items = [
+    { title: best ? `${best.tab.label}: ${formatValue(best.rangeValue, best.tab.unit)}` : "No KPI data", text: "Best range score" },
+    { title: needsAttention ? `${needsAttention.tab.label}: ${formatValue(needsAttention.rangeValue, needsAttention.tab.unit)}` : "No KPI data", text: "Lowest range score" },
+    { title: improved ? `${improved.tab.label}: ${formatDelta(improved.delta, improved.tab.unit)}` : "No KPI data", text: "Strongest movement" }
+  ];
+
+  els.insightList.innerHTML = "";
+  items.forEach((item) => {
+    const div = document.createElement("div");
+    div.className = "insight-item";
+    div.innerHTML = `<strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.text)}</span>`;
+    els.insightList.append(div);
+  });
+}
+
+function renderCharts(summaries) {
+  els.chartsGrid.innerHTML = "";
+  const template = document.querySelector("#chartTemplate");
+
+  summaries.forEach((summary) => {
+    const node = template.content.firstElementChild.cloneNode(true);
+    node.querySelector(".eyebrow").textContent = summary.tab.sheet;
+    node.querySelector("h4").textContent = summary.tab.label;
+    node.querySelector(".trend-pill").textContent = summary.changeText;
+    const svg = node.querySelector("svg");
+    els.chartsGrid.append(node);
+    drawSvgChart(svg, summary);
+  });
+}
+
+function drawSvgChart(svg, summary) {
+  const width = 700;
+  const height = 250;
+  const pad = { top: 36, right: 18, bottom: 36, left: 54 };
+  const innerWidth = width - pad.left - pad.right;
+  const innerHeight = height - pad.top - pad.bottom;
+  const points = summary.points;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("aria-label", `${summary.tab.label} trend chart`);
+
+  if (!points.length) {
+    svg.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="chart-label">No data in range</text>`;
+    return;
+  }
+
+  const values = points.map((point) => point.value);
+  const maxValue = summary.tab.unit === "percent" ? Math.max(100, ...values) : Math.max(...values, 1);
+  const yMax = Math.ceil(maxValue / 10) * 10;
+  const xFor = (index) => pad.left + (points.length === 1 ? innerWidth / 2 : (index / (points.length - 1)) * innerWidth);
+  const yFor = (value) => pad.top + innerHeight - (value / yMax) * innerHeight;
+  const linePoints = points.map((point, index) => `${xFor(index)},${yFor(point.value)}`);
+  const area = `M ${pad.left},${pad.top + innerHeight} L ${linePoints.join(" L ")} L ${pad.left + innerWidth},${pad.top + innerHeight} Z`;
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((tick) => {
+    const y = pad.top + innerHeight - tick * innerHeight;
+    const value = yMax * tick;
+    return `
+      <line x1="${pad.left}" y1="${y}" x2="${pad.left + innerWidth}" y2="${y}" class="chart-grid-line" />
+      <text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" class="chart-label">${escapeHtml(formatValue(value, summary.tab.unit))}</text>`;
+  }).join("");
+  const labelStep = Math.max(1, Math.ceil(points.length / 6));
+  const labels = points.map((point, index) => {
+    if (index % labelStep !== 0 && index !== points.length - 1) return "";
+    return `<text x="${xFor(index)}" y="${height - 10}" text-anchor="middle" class="chart-label">${escapeHtml(point.label)}</text>`;
+  }).join("");
+  const circles = points.map((point, index) => `
+    <circle cx="${xFor(index)}" cy="${yFor(point.value)}" r="4" fill="${summary.tab.color}" class="chart-point">
+      <title>${escapeHtml(point.label)}: ${escapeHtml(formatValue(point.value, summary.tab.unit))}</title>
+    </circle>`).join("");
+  const valueLabels = points.map((point, index) => {
+    const y = Math.max(12, yFor(point.value) - 10 - ((index % 2) * 9));
+    return `<text x="${xFor(index)}" y="${y}" text-anchor="middle" class="chart-value-label">${escapeHtml(formatChartValue(point.value, summary.tab.unit))}</text>`;
+  }).join("");
+
+  svg.innerHTML = `
+    ${grid}
+    <line x1="${pad.left}" y1="${pad.top + innerHeight}" x2="${pad.left + innerWidth}" y2="${pad.top + innerHeight}" class="chart-axis" />
+    <path d="${area}" fill="${summary.tab.color}" class="chart-area" />
+    <polyline points="${linePoints.join(" ")}" stroke="${summary.tab.color}" class="chart-line" />
+    ${circles}
+    ${valueLabels}
+    ${labels}`;
+}
+
+function summarizeKpi(tab, username, range) {
+  const rows = state.kpis.get(tab.id);
+  const series = rows && rows.get(username) ? rows.get(username) : [];
+  const points = series.filter((point) => point.month >= range.start && point.month <= range.end);
+  const values = points.map((point) => point.value);
+  const latest = values.length ? values[values.length - 1] : null;
+  const first = values.length ? values[0] : null;
+  const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const total = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  const rangeValue = tab.aggregate === "sum" ? total : average;
+  const delta = latest !== null && first !== null ? latest - first : 0;
+  const scoreValue = calculateKpiScore(tab, rangeValue, points.length);
+  return {
+    tab,
+    points,
+    latest,
+    first,
+    average,
+    total,
+    rangeValue,
+    scoreValue,
+    delta,
+    rangeLabel: tab.aggregate === "sum" ? "Total" : "Average",
+    changeText: values.length > 1 ? formatDelta(delta, tab.unit) : "No trend"
+  };
+}
+
+function calculateScore(summaries) {
+  const weighted = summaries.filter((summary) => summary.tab.overallWeight && summary.rangeValue !== null);
+  const totalWeight = weighted.reduce((sum, summary) => sum + summary.tab.overallWeight, 0);
+  if (!totalWeight) return null;
+  return weighted.reduce((sum, summary) => sum + (summary.rangeValue * summary.tab.overallWeight), 0) / totalWeight;
+}
+
+function calculateKpiScore(tab, rangeValue, monthCount) {
+  if (rangeValue === null || rangeValue === undefined || !monthCount) return null;
+  if (tab.unit === "percent") return clamp(rangeValue, 0, 100);
+  if (tab.targetPerMonth) return clamp((rangeValue / (tab.targetPerMonth * monthCount)) * 100, 0, 100);
+  return null;
+}
+
+function downloadReport() {
+  const employee = state.employees.get(state.selectedUser);
+  if (!employee) return;
+  const range = getRange();
+  const chartSvgs = [...document.querySelectorAll(".chart-wrap svg")].map((svg) => svg.outerHTML);
+  const summaries = KPI_TABS.map((tab) => summarizeKpi(tab, state.selectedUser, range));
+  const rows = summaries.map((summary) => `
+    <tr>
+      <td>${escapeHtml(summary.tab.label)}</td>
+      <td>${escapeHtml(formatValue(summary.rangeValue, summary.tab.unit))}</td>
+      <td>${escapeHtml(summary.rangeLabel)}</td>
+      <td>${escapeHtml(summary.changeText)}</td>
+    </tr>`).join("");
+  const charts = summaries.map((summary, index) => `
+    <section>
+      <h2>${escapeHtml(summary.tab.label)}</h2>
+      <div class="chart">${chartSvgs[index] || ""}</div>
+    </section>`).join("");
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(displayName(employee))} Performance Report</title>
+  <style>
+    @page { margin: 14mm; }
+    body { background: #fbfcff; color: #1f0961; font-family: Inter, Arial, sans-serif; margin: 0; padding: 28px; }
+    header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 1px solid #edf0f7; padding-bottom: 18px; }
+    .eyebrow { color: #7b55ff; font-size: 11px; font-weight: 500; margin: 0 0 8px; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 34px; line-height: 1.05; }
+    p { color: #2f3742; margin: 8px 0 0; }
+    .score { color: #7b55ff; font-size: 44px; font-weight: 600; text-align: right; white-space: nowrap; }
+    .score small { color: #2f3742; display: block; font-size: 12px; font-weight: 500; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; margin: 24px 0; background: #ffffff; box-shadow: 0 18px 42px rgba(31, 9, 97, 0.08); }
+    th, td { border-bottom: 1px solid #edf0f7; padding: 10px; text-align: left; }
+    th { color: #1f0961; font-weight: 500; }
+    .chart { width: 100%; border: 1px solid #edf0f7; border-radius: 10px; background: #ffffff; box-shadow: 0 18px 42px rgba(31, 9, 97, 0.08); }
+    svg { width: 100%; height: 300px; }
+    .chart-axis { stroke: #d8e1eb; stroke-width: 1; }
+    .chart-grid-line { stroke: #edf1f5; stroke-width: 1; }
+    .chart-line { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .chart-area { opacity: 0.14; }
+    .chart-point { stroke: #ffffff; stroke-width: 2; }
+    .chart-label { fill: #2f3742; font-size: 11px; font-weight: 500; }
+    .chart-value-label { fill: #1f0961; font-size: 10px; font-weight: 600; }
+    section { break-inside: avoid; margin-top: 24px; }
+    section h2 { font-size: 18px; font-weight: 500; margin: 0 0 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Employee performance profile</p>
+      <h1>${escapeHtml(displayName(employee))}</h1>
+      <p>${escapeHtml(buildMetaLine(employee))}</p>
+      <p>${escapeHtml(monthLabel(range.start))} to ${escapeHtml(monthLabel(range.end))}</p>
+    </div>
+    <div class="score">${escapeHtml(els.scoreValue.textContent)}<small>AVG Overall</small></div>
+  </header>
+  <table>
+    <thead><tr><th>KPI</th><th>Range value</th><th>Basis</th><th>Trend</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  ${charts}
+  <script>
+    window.addEventListener("load", () => {
+      window.print();
+    });
+  </script>
+</body>
+</html>`;
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    downloadBlob(html, `${state.selectedUser}-performance-report.html`, "text/html");
+    setStatus("Popup blocked", "Downloaded a print-ready HTML report. Open it and use Print > Save as PDF.");
+    return;
+  }
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+}
+
+function downloadCsv() {
+  if (!state.selectedUser) return;
+  const range = getRange();
+  const rows = [["Username", "KPI", "Month", "Value"]];
+  KPI_TABS.forEach((tab) => {
+    const summary = summarizeKpi(tab, state.selectedUser, range);
+    summary.points.forEach((point) => rows.push([state.selectedUser, tab.label, point.label, point.value]));
+  });
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  downloadBlob(csv, `${state.selectedUser}-performance-data.csv`, "text/csv");
+}
+
+function initializeEvaluationInputs() {
+  if (els.evaluationInputs.children.length) {
+    if (state.annualAutoRange) resetAnnualRange();
+    renderAnnualEvaluation();
+    return;
+  }
+  addEvaluationField();
+  resetAnnualRange();
+}
+
+function addEvaluationField(value = "") {
+  const row = document.createElement("div");
+  row.className = "evaluation-input-row";
+  row.innerHTML = `
+    <label class="field evaluation-field">
+      <span>Username</span>
+      <input class="evaluation-user-input" list="employeeOptions" type="search" autocomplete="off" placeholder="Type username or name" value="${escapeAttribute(value)}" />
+    </label>
+    <button type="button" class="remove-evaluation-user" aria-label="Remove username">Remove</button>`;
+
+  const input = row.querySelector(".evaluation-user-input");
+  input.addEventListener("input", () => {
+    const typed = normalizeUser(input.value);
+    if (state.employees.has(typed)) input.value = state.employees.get(typed).username;
+    if (state.annualAutoRange) resetAnnualRange();
+    renderAnnualEvaluation();
+  });
+  input.addEventListener("change", () => {
+    normalizeEvaluationInput(input);
+    if (state.annualAutoRange) resetAnnualRange();
+    renderAnnualEvaluation();
+  });
+  input.addEventListener("blur", () => {
+    normalizeEvaluationInput(input);
+    if (state.annualAutoRange) resetAnnualRange();
+    renderAnnualEvaluation();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      normalizeEvaluationInput(input);
+      if (state.annualAutoRange) resetAnnualRange();
+      renderAnnualEvaluation();
+    }
+  });
+
+  row.querySelector(".remove-evaluation-user").addEventListener("click", () => {
+    row.remove();
+    if (!els.evaluationInputs.children.length) addEvaluationField();
+    if (state.annualAutoRange) resetAnnualRange();
+    renderAnnualEvaluation();
+  });
+
+  els.evaluationInputs.append(row);
+  input.focus();
+  renderAnnualEvaluation();
+}
+
+function normalizeEvaluationInput(input) {
+  const typed = normalizeUser(input.value);
+  if (!typed) return;
+  const employee = findEmployee(typed);
+  if (employee) input.value = employee.username;
+}
+
+function renderAnnualEvaluation() {
+  const rows = annualEvaluationRows();
+  if (!rows.length) {
+    els.evaluationTableBody.innerHTML = '<tr><td colspan="11" class="evaluation-empty">Add a username to begin.</td></tr>';
+    return;
+  }
+
+  els.evaluationTableBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.fullName)}</td>
+      <td>${escapeHtml(row.username)}</td>
+      <td>${escapeHtml(row.shift)}</td>
+      <td>${escapeHtml(row.shiftType)}</td>
+      <td>${escapeHtml(formatValue(row.sales, "count"))}</td>
+      <td class="${kpiCellClass(row.dependability)}">${escapeHtml(formatValue(row.dependability, "percent"))}</td>
+      <td class="${kpiCellClass(row.quality)}">${escapeHtml(formatValue(row.quality, "percent"))}</td>
+      <td class="${kpiCellClass(row.rt)}">${escapeHtml(formatValue(row.rt, "percent"))}</td>
+      <td class="${kpiCellClass(row.tnd)}">${escapeHtml(formatValue(row.tnd, "percent"))}</td>
+      <td class="overall-cell">${escapeHtml(row.overall === null ? "--" : `${formatScore(row.overall)}%`)}</td>
+      <td class="team-cell ${teamClass(row.team)}">${escapeHtml(row.team)}</td>
+    </tr>`).join("");
+}
+
+function annualEvaluationRows() {
+  return selectedAnnualEmployees()
+    .map((employee) => buildAnnualEvaluationRow(normalizeUser(employee.username)));
+}
+
+function buildAnnualEvaluationRow(username) {
+  const employee = state.employees.get(username) || { username };
+  const range = getAnnualRange() || annualRangeForEmployee(username);
+  const summaries = range ? KPI_TABS.map((tab) => summarizeKpi(tab, username, range)) : [];
+  const byId = new Map(summaries.map((summary) => [summary.tab.id, summary]));
+  const baseOverall = summaries.length ? calculateScore(summaries) : null;
+  const sales = byId.get("sales")?.rangeValue ?? null;
+  const salesBonus = sales === null ? 0 : sales / 1000;
+  const overall = baseOverall === null ? null : baseOverall + salesBonus;
+
+  return {
+    fullName: displayName(employee),
+    username: employee.username || username,
+    shift: employee.shiftType || "",
+    shiftType: employee.empType || "",
+    sales,
+    dependability: byId.get("dependability")?.rangeValue ?? null,
+    quality: byId.get("quality")?.rangeValue ?? null,
+    rt: byId.get("rt")?.rangeValue ?? null,
+    tnd: byId.get("tnd")?.rangeValue ?? null,
+    overall,
+    team: employee.team || state.teams.get(username) || "",
+    range
+  };
+}
+
+function selectedAnnualEmployees() {
+  const seen = new Set();
+  return [...els.evaluationInputs.querySelectorAll(".evaluation-user-input")]
+    .map((input) => findEmployee(normalizeUser(input.value)))
+    .filter(Boolean)
+    .filter((employee) => {
+      const username = normalizeUser(employee.username);
+      if (seen.has(username)) return false;
+      seen.add(username);
+      return true;
+    });
+}
+
+function getAnnualRange() {
+  let start = els.annualStartMonth.value;
+  let end = els.annualEndMonth.value;
+  if (!start || !end) return null;
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
+function resetAnnualRange() {
+  const range = latestSheetMonthRange(12);
+  if (!range) return;
+  els.annualStartMonth.value = range.start;
+  els.annualEndMonth.value = range.end;
+}
+
+function latestSheetMonthRange(size) {
+  const months = selectableMonths();
+  if (!months.length) return null;
+  const end = months[months.length - 1];
+  const start = months[Math.max(0, months.length - size)];
+  return { start: start.key, end: end.key };
+}
+
+function latestCompleteMonthRange(username, size) {
+  const months = dataMonthsForEmployee(username);
+  if (!months.length) return latestSheetMonthRange(size);
+  const end = months[months.length - 1];
+  const start = months[Math.max(0, months.length - size)];
+  return { start: start.key, end: end.key };
+}
+
+function annualRangeForEmployee(username) {
+  return latestCompleteMonthRange(username, 12);
+}
+
+function downloadEvaluationPdf() {
+  const rows = annualEvaluationRows();
+  if (!rows.length) {
+    setStatus("No annual rows", "Add at least one username before downloading the annual evaluation PDF.");
+    return;
+  }
+
+  const rangeText = annualEvaluationRangeText(rows);
+  const tableRows = rows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row.fullName)}</td>
+      <td>${escapeHtml(row.username)}</td>
+      <td>${escapeHtml(row.shift)}</td>
+      <td>${escapeHtml(row.shiftType)}</td>
+      <td>${escapeHtml(formatValue(row.sales, "count"))}</td>
+      <td class="${kpiCellClass(row.dependability)}">${escapeHtml(formatValue(row.dependability, "percent"))}</td>
+      <td class="${kpiCellClass(row.quality)}">${escapeHtml(formatValue(row.quality, "percent"))}</td>
+      <td class="${kpiCellClass(row.rt)}">${escapeHtml(formatValue(row.rt, "percent"))}</td>
+      <td class="${kpiCellClass(row.tnd)}">${escapeHtml(formatValue(row.tnd, "percent"))}</td>
+      <td class="overall">${escapeHtml(row.overall === null ? "--" : `${formatScore(row.overall)}%`)}</td>
+      <td class="team ${teamClass(row.team)}">${escapeHtml(row.team)}</td>
+    </tr>`).join("");
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Annual Increment Evaluation</title>
+  <style>
+    @page { size: landscape; margin: 14mm; }
+    body { color: #1f0961; font-family: Arial, sans-serif; margin: 0; }
+    header { border-bottom: 3px solid #6c44f7; margin-bottom: 18px; padding-bottom: 12px; }
+    p { margin: 4px 0; color: #2f3742; }
+    h1 { margin: 0; font-size: 24px; }
+    table { border-collapse: collapse; width: 100%; font-size: 11px; }
+    th, td { border: 1px solid #17233f; padding: 6px 7px; text-align: center; }
+    th { background: #ecf9ff; color: #1f0961; font-weight: 500; }
+    td:first-child, th:first-child { text-align: left; }
+    .overall { font-weight: 600; font-size: 13px; }
+    .team { color: #ffffff; font-weight: 600; }
+    .team-dominators { background: #6c44f7; }
+    .team-wizards { background: #c23eff; }
+    .team-dodgers { background: #155dff; }
+    .team-rookie { background: #45caff; color: #1f0961; }
+    .low-kpi { color: #d01818; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <p>BREAKTHRU</p>
+    <h1>Annual Increment Evaluation</h1>
+    <p>${escapeHtml(rangeText)} | Sales bonus: Sales / 1000 percentage points</p>
+  </header>
+  <table>
+    <thead>
+      <tr>
+        <th>Full Name</th><th>Username</th><th>Shift</th><th>Shift Type</th><th>Sales</th>
+        <th>Dependability</th><th>Chat Quality</th><th>Avg RT</th><th>T&D</th><th>Overall</th><th>Team</th>
+      </tr>
+    </thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+  <script>
+    window.addEventListener("load", () => {
+      window.print();
+    });
+  </script>
+</body>
+</html>`;
+
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    downloadBlob(html, "annual-increment-evaluation.html", "text/html");
+    setStatus("Popup blocked", "Downloaded a print-ready HTML report. Open it and use Print > Save as PDF.");
+    return;
+  }
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+}
+
+function annualEvaluationRangeText(rows) {
+  const ranges = rows
+    .filter((row) => row.range)
+    .map((row) => `${monthLabel(row.range.start)} to ${monthLabel(row.range.end)}`);
+  const unique = [...new Set(ranges)];
+  if (!unique.length) return "Last 12 complete KPI months";
+  return unique.length === 1 ? unique[0] : "Employee-specific last 12 complete KPI months";
+}
+
+function teamClass(team) {
+  const key = normalizeHeader(team).replace(/\s+/g, "-");
+  if (key === "dominators") return "team-dominators";
+  if (key === "wizards") return "team-wizards";
+  if (key === "dodgers") return "team-dodgers";
+  if (key === "rookie") return "team-rookie";
+  return "";
+}
+
+function kpiCellClass(value) {
+  return value !== null && value !== undefined && !Number.isNaN(value) && value < 50 ? "low-kpi" : "";
+}
+
+function extractSheetId(url) {
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return match ? match[1] : "";
+}
+
+function parseMonth(input) {
+  const text = cleanCell(input);
+  if (!text) return null;
+  if (input instanceof Date) return monthObject(input.getFullYear(), input.getMonth());
+
+  const months = {
+    jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
+    may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8, sept: 8,
+    september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11
+  };
+  const normalized = text.toLowerCase().replace(/[,]/g, " ").replace(/\s+/g, " ").trim();
+  const match = normalized.match(/([a-z]+)\s*['-]?\s*(\d{2,4})/) || normalized.match(/(\d{2,4})\s*['-]?\s*([a-z]+)/);
+  if (!match) return null;
+
+  const monthName = Number.isNaN(Number(match[1])) ? match[1] : match[2];
+  const yearText = Number.isNaN(Number(match[1])) ? match[2] : match[1];
+  const month = months[monthName.slice(0, 3)] ?? months[monthName];
+  if (month === undefined) return null;
+  const year = yearText.length === 2 ? 2000 + Number(yearText) : Number(yearText);
+  return monthObject(year, month);
+}
+
+function monthObject(year, month) {
+  const date = new Date(year, month, 1);
+  return {
+    key: `${year}-${String(month + 1).padStart(2, "0")}`,
+    label: date.toLocaleString("en-US", { month: "short", year: "2-digit" })
+  };
+}
+
+function addMonth(month) {
+  if (!state.months.some((item) => item.key === month.key)) state.months.push(month);
+}
+
+function parseMetric(value, unit) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") {
+    if (unit === "percent" && value > 0 && value <= 1) return value * 100;
+    return value;
+  }
+  const text = String(value).replace(/,/g, "").trim();
+  if (!text) return null;
+  const number = Number(text.replace("%", ""));
+  if (Number.isNaN(number)) return null;
+  if (unit === "percent" && !text.includes("%") && number > 0 && number <= 1) return number * 100;
+  return number;
+}
+
+function monthsForEmployee(username) {
+  const months = new Set();
+  state.kpis.forEach((rows) => {
+    const series = rows.get(username) || [];
+    series.forEach((point) => months.add(point.month));
+  });
+  return state.months.filter((month) => months.has(month.key));
+}
+
+function selectableMonths() {
+  const months = state.months.filter((month) => monthHasActualData(month.key));
+  return (months.length ? months : state.months).sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function monthHasActualData(monthKey) {
+  return KPI_TABS.some((tab) => {
+    if (!ACTUAL_DATA_KPI_IDS.has(tab.id)) return false;
+    const rows = state.kpis.get(tab.id);
+    if (!rows) return false;
+    for (const series of rows.values()) {
+      if (series.some((point) => point.month === monthKey && isActualMetricValue(point.value))) return true;
+    }
+    return false;
+  });
+}
+
+function monthHasActualDataForEmployee(username, monthKey) {
+  for (const tab of KPI_TABS) {
+    if (!ACTUAL_DATA_KPI_IDS.has(tab.id)) continue;
+    const rows = state.kpis.get(tab.id);
+    const series = rows && rows.get(username) ? rows.get(username) : [];
+    if (series.some((point) => point.month === monthKey && isActualMetricValue(point.value))) return true;
+  }
+  return false;
+}
+
+function isActualMetricValue(value) {
+  return Number.isFinite(value) && value !== 0;
+}
+
+function dataMonthsForEmployee(username) {
+  return monthsForEmployee(username).filter((month) => monthHasActualDataForEmployee(username, month.key));
+}
+
+function completeDataMonthsForEmployee(username) {
+  const dataMonths = dataMonthsForEmployee(username);
+  const complete = dataMonths.filter((month) => {
+    return KPI_TABS.every((tab) => {
+      const rows = state.kpis.get(tab.id);
+      const series = rows && rows.get(username) ? rows.get(username) : [];
+      return series.some((point) => point.month === month.key && isActualMetricValue(point.value));
+    });
+  });
+  return complete.length ? complete : dataMonths;
+}
+
+function completeMonthsForEmployee(username) {
+  const anyMonths = monthsForEmployee(username);
+  const complete = anyMonths.filter((month) => {
+    return KPI_TABS.every((tab) => {
+      const rows = state.kpis.get(tab.id);
+      const series = rows && rows.get(username) ? rows.get(username) : [];
+      return series.some((point) => point.month === month.key);
+    });
+  });
+  return complete.length ? complete : anyMonths;
+}
+
+function selectTypedEmployee() {
+  const typed = normalizeUser(els.employeeInput.value);
+  if (!typed || typed === "loading employees...") return;
+  const employee = findEmployee(typed);
+  if (!employee) {
+    setStatus("Employee not found", `No username or name matched "${els.employeeInput.value}".`);
+    return;
+  }
+  state.selectedUser = normalizeUser(employee.username);
+  els.employeeInput.value = employee.username;
+  renderDashboard();
+}
+
+function selectExactEmployee() {
+  const typed = normalizeUser(els.employeeInput.value);
+  if (!typed || !state.employees.has(typed) || typed === state.selectedUser) return;
+  const employee = state.employees.get(typed);
+  state.selectedUser = typed;
+  els.employeeInput.value = employee.username;
+  renderDashboard();
+}
+
+function findEmployee(value) {
+  if (state.employees.has(value)) return state.employees.get(value);
+  return [...state.employees.values()].find((employee) => {
+    const username = normalizeUser(employee.username);
+    const name = normalizeUser(employee.name);
+    return username.includes(value) || name.includes(value);
+  });
+}
+
+function setActiveRangeButton(range) {
+  document.querySelectorAll("[data-range]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.range === range);
+  });
+}
+
+function getRange() {
+  let start = els.startMonth.value;
+  let end = els.endMonth.value;
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
+function monthLabel(key) {
+  const found = state.months.find((month) => month.key === key);
+  return found ? found.label : key;
+}
+
+function ensureEmployee(username) {
+  const key = normalizeUser(username);
+  if (!state.employees.has(key)) state.employees.set(key, { username });
+  return state.employees.get(key);
+}
+
+function displayName(employee) {
+  return employee.name || employee.username || "Unknown employee";
+}
+
+function buildMetaLine(employee) {
+  return [
+    employee.username && `Username: ${employee.username}`,
+    employee.level && `Level: ${employee.level}`,
+    employee.empType && `Emp.Type: ${employee.empType}`,
+    employee.shiftType && `Shift: ${employee.shiftType}`,
+    employee.designation,
+    employee.team && `Team: ${employee.team}`
+  ].filter(Boolean).join(" | ");
+}
+
+function currentTeamValue(headers, values) {
+  const headerIndex = headers.findIndex((header) => normalizeHeader(header) === "current team");
+  const index = headerIndex >= 0 ? headerIndex : 1;
+  return cleanCell(values[index]);
+}
+
+function normalizeUser(value) {
+  return cleanCell(value).toLowerCase();
+}
+
+function normalizeHeader(value) {
+  return cleanCell(value).toLowerCase().replace(/[^a-z0-9]+/g, " ");
+}
+
+function cleanCell(value) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  return String(value).trim();
+}
+
+function formatValue(value, unit) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  if (unit === "percent") return `${value.toFixed(2)}%`;
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function formatChartValue(value, unit) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "";
+  if (unit === "percent") return `${value.toFixed(1)}%`;
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function formatScore(value) {
+  return (Math.trunc(value * 100) / 100).toFixed(2);
+}
+
+function formatDelta(value, unit) {
+  const sign = value > 0 ? "+" : "";
+  if (unit === "percent") return `${sign}${value.toFixed(2)} pts`;
+  return `${sign}${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function setEmptyControls() {
+  els.employeeInput.value = "Loading employees...";
+  els.employeeOptions.innerHTML = "";
+  els.startMonth.innerHTML = "<option>--</option>";
+  els.endMonth.innerHTML = "<option>--</option>";
+  els.annualStartMonth.innerHTML = "<option>--</option>";
+  els.annualEndMonth.innerHTML = "<option>--</option>";
+}
+
+function renderEmpty() {
+  els.employeeName.textContent = "No employee data";
+  els.employeeMeta.textContent = "Check that the sheet is accessible and tab names match the expected KPI tabs.";
+  els.scoreValue.textContent = "--";
+  els.summaryGrid.innerHTML = "";
+  els.insightList.innerHTML = "";
+  els.chartsGrid.innerHTML = '<div class="empty-state">No KPI values found for the selected employee and range.</div>';
+}
+
+function setStatus(title, text) {
+  els.statusTitle.textContent = title;
+  els.statusText.textContent = text;
+}
+
+function friendlyError(error) {
+  return `${error.message || error}. Make sure the Google Sheet is shared so anyone with the link can view it.`;
+}
+
+function downloadBlob(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/'/g, "&#39;");
+}

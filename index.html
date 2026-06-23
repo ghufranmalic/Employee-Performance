@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Employee Performance Profile</title>
+    <link rel="icon" href="https://www.breakthru.pk/favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/styles.css?v=20260623-lighter-type" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div>
+            <p class="brand-word">EMPLOYEE PROFILE</p>
+            <h1>Employee Performance</h1>
+          </div>
+        </div>
+
+        <form id="controls" class="controls">
+          <label class="field">
+            <span>Google Sheet URL</span>
+            <input id="sheetUrl" type="url" autocomplete="off" />
+          </label>
+          <button id="loadBtn" class="primary-btn" type="submit">
+            Load data
+          </button>
+
+          <label class="field">
+            <span>Employee</span>
+            <input id="employeeInput" list="employeeOptions" type="search" autocomplete="off" placeholder="Type username or name" />
+            <datalist id="employeeOptions"></datalist>
+          </label>
+
+          <div class="range-grid">
+            <label class="field">
+              <span>From</span>
+              <select id="startMonth"></select>
+            </label>
+            <label class="field">
+              <span>To</span>
+              <select id="endMonth"></select>
+            </label>
+          </div>
+
+          <div class="quick-ranges" aria-label="Quick ranges">
+            <button type="button" data-range="3" class="chip">3 mo</button>
+            <button type="button" data-range="6" class="chip">6 mo</button>
+            <button type="button" data-range="12" class="chip active">12 mo</button>
+            <button type="button" data-range="all" class="chip">All</button>
+          </div>
+
+          <div class="actions">
+            <button id="downloadReport" type="button" class="secondary-btn">
+              Download PDF
+            </button>
+            <button id="downloadCsv" type="button" class="secondary-btn">
+              CSV
+            </button>
+          </div>
+        </form>
+
+        <div id="statusPanel" class="status-panel">
+          <p class="status-title">Ready</p>
+          <p id="statusText">Paste a Sheet URL or use the default Employee Performance Profile sheet.</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="profile-strip">
+          <div>
+            <p class="eyebrow">Employee profile</p>
+            <h2 id="employeeName">Select an employee</h2>
+            <p id="employeeMeta" class="muted">Load the sheet to begin.</p>
+          </div>
+          <div class="score-block">
+            <span id="scoreValue">--</span>
+            <small>AVG Overall</small>
+          </div>
+        </section>
+
+        <section class="summary-grid" id="summaryGrid"></section>
+
+        <section class="insights">
+          <div>
+            <p class="eyebrow">Range insight</p>
+            <h3 id="rangeTitle">Past 12 months</h3>
+          </div>
+          <div id="insightList" class="insight-list"></div>
+        </section>
+
+        <section class="charts-header">
+          <div>
+            <p class="eyebrow">KPI trends</p>
+            <h3>Performance graphs</h3>
+          </div>
+          <p id="coverageText" class="muted">No data loaded yet.</p>
+        </section>
+
+        <section id="chartsGrid" class="charts-grid"></section>
+
+        <section class="annual-evaluation">
+          <div class="annual-header">
+            <div>
+              <p class="eyebrow">Annual increment evaluation</p>
+              <h3>Last 12 months KPI comparison</h3>
+              <p class="muted">Add usernames to calculate annual KPIs, weighted overall, sales bonus, and current team.</p>
+            </div>
+            <div class="annual-actions">
+              <div class="annual-range">
+                <label>
+                  <span>From</span>
+                  <select id="annualStartMonth"></select>
+                </label>
+                <label>
+                  <span>To</span>
+                  <select id="annualEndMonth"></select>
+                </label>
+              </div>
+              <button id="refreshEvaluationRange" type="button" class="secondary-action icon-only" title="Refresh last 12 months" aria-label="Refresh last 12 months">&#8635;</button>
+              <button id="addEvaluationUser" type="button" class="secondary-action">Add</button>
+              <button id="downloadEvaluationPdf" type="button" class="primary-action">Download PDF</button>
+            </div>
+          </div>
+
+          <div id="evaluationInputs" class="evaluation-inputs"></div>
+
+          <div class="evaluation-table-wrap">
+            <table class="evaluation-table">
+              <thead>
+                <tr>
+                  <th>Full Name</th>
+                  <th>Username</th>
+                  <th>Shift</th>
+                  <th>Shift Type</th>
+                  <th>Sales</th>
+                  <th>Dependability</th>
+                  <th>Chat Quality</th>
+                  <th>Avg RT</th>
+                  <th>T&D</th>
+                  <th>Overall</th>
+                  <th>Team</th>
+                </tr>
+              </thead>
+              <tbody id="evaluationTableBody">
+                <tr>
+                  <td colspan="11" class="evaluation-empty">Add a username to begin.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="metricCardTemplate">
+      <article class="metric-card">
+        <div class="metric-head">
+          <span class="metric-dot"></span>
+          <p></p>
+        </div>
+        <strong></strong>
+        <small></small>
+      </article>
+    </template>
+
+    <template id="chartTemplate">
+      <article class="chart-card">
+        <div class="chart-title-row">
+          <div>
+            <p class="eyebrow"></p>
+            <h4></h4>
+          </div>
+          <span class="trend-pill"></span>
+        </div>
+        <div class="chart-wrap">
+          <svg role="img"></svg>
+        </div>
+      </article>
+    </template>
+
+    <script type="module" src="/src/app.js?v=20260623-latest-real-kpi-month"></script>
+  </body>
+</html>
