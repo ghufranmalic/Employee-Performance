@@ -443,14 +443,22 @@ button {
 
 .bonus-tile-body {
   min-height: 220px;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
+}
+
+.bonus-tile-body.scrollable-chart {
+  overflow-x: auto;
 }
 
 .bonus-tile-body svg {
   display: block;
-  min-width: 100%;
+  width: 100%;
   height: 100%;
+}
+
+.scrollable-chart svg {
+  width: auto;
 }
 
 .bonus-latest-month {
@@ -495,6 +503,10 @@ button {
 
 .bonus-employee-card strong {
   font-size: 24px;
+}
+
+.employee-team-tile {
+  grid-column: span 2;
 }
 
 .insights {
@@ -905,6 +917,10 @@ button {
 
   .employee-breakdown-grid {
     grid-template-columns: 1fr;
+  }
+
+  .employee-team-tile {
+    grid-column: auto;
   }
 
   .annual-header {

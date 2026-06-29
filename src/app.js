@@ -134,8 +134,22 @@ els.bonusEmployeeInput.addEventListener("keydown", (event) => {
   }
 });
 els.bonusTrendToggle.addEventListener("change", renderBonusDashboard);
-els.bonusStartMonth.addEventListener("change", renderBonusDashboard);
-els.bonusEndMonth.addEventListener("change", renderBonusDashboard);
+els.bonusStartMonth.addEventListener("change", () => {
+  setActiveBonusRangeButton("");
+  renderBonusDashboard();
+});
+els.bonusEndMonth.addEventListener("change", () => {
+  setActiveBonusRangeButton("");
+  renderBonusDashboard();
+});
+document.querySelectorAll("[data-bonus-range]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const range = button.dataset.bonusRange === "all" ? "all" : Number(button.dataset.bonusRange);
+    setBonusDefaultRange(range);
+    setActiveBonusRangeButton(button.dataset.bonusRange);
+    renderBonusDashboard();
+  });
+});
 
 els.bonusSheetUrl.value = BONUS_SHEET_URL;
 
@@ -569,9 +583,25 @@ function buildBonusMonthOptions() {
     });
   });
   if (state.bonusMonths.length) {
-    els.bonusStartMonth.value = state.bonusMonths[0].key;
-    els.bonusEndMonth.value = state.bonusMonths[state.bonusMonths.length - 1].key;
+    setBonusDefaultRange(12);
+    setActiveBonusRangeButton("12");
   }
+}
+
+function setBonusDefaultRange(size) {
+  if (!state.bonusMonths.length) return;
+  const end = state.bonusMonths[state.bonusMonths.length - 1];
+  const start = size === "all"
+    ? state.bonusMonths[0]
+    : state.bonusMonths[Math.max(0, state.bonusMonths.length - size)];
+  els.bonusStartMonth.value = start.key;
+  els.bonusEndMonth.value = end.key;
+}
+
+function setActiveBonusRangeButton(range) {
+  document.querySelectorAll("[data-bonus-range]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.bonusRange === range);
+  });
 }
 
 function getBonusRange() {
@@ -774,11 +804,13 @@ function renderBonusTiles(summaries) {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("role", "img");
       body.append(svg);
+      body.classList.toggle("scrollable-chart", summaries.length > 18);
       drawTeamBreakdownChart(svg, summaries);
     } else {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("role", "img");
       body.append(svg);
+      body.classList.toggle("scrollable-chart", summaries.length > 18);
       drawBonusBarChart(svg, {
         title: tile.title,
         key: tile.key,
@@ -839,6 +871,7 @@ function renderBonusHistory(rows, employee) {
 
 function renderBonusEmployeeSummary(rows) {
   const cards = [
+    { type: "team-history", label: "Historical Teams", color: "#45caff" },
     { label: "Total OFFs", value: sumRows(rows, "totalOffs"), unit: "count", detail: `${rows.length} selected months`, color: "#155dff" },
     { label: "Sales + QA", value: sumRows(rows, "salesQa"), unit: "money", detail: `${rows.length} selected months`, color: "#4b8dff" },
     { label: "Final Team Bonus", value: sumRows(rows, "finalTeamBonus"), unit: "money", detail: `${rows.length} selected months`, color: "#c23eff" },
@@ -847,6 +880,26 @@ function renderBonusEmployeeSummary(rows) {
   els.bonusEmployeeSummaryGrid.innerHTML = "";
   const template = document.querySelector("#metricCardTemplate");
   cards.forEach((card) => {
+    if (card.type === "team-history") {
+      const node = document.createElement("article");
+      node.className = "bonus-tile employee-team-tile";
+      node.innerHTML = `
+        <div class="bonus-tile-head">
+          <div>
+            <p class="eyebrow">History</p>
+            <h4>${escapeHtml(card.label)}</h4>
+          </div>
+        </div>
+        <div class="bonus-tile-body"></div>`;
+      const body = node.querySelector(".bonus-tile-body");
+      body.classList.toggle("scrollable-chart", rows.length > 18);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("role", "img");
+      body.append(svg);
+      drawEmployeeTeamHistoryChart(svg, rows);
+      els.bonusEmployeeSummaryGrid.append(node);
+      return;
+    }
     const node = template.content.firstElementChild.cloneNode(true);
     node.classList.add("bonus-employee-card");
     node.querySelector(".metric-dot").style.background = card.color;
@@ -859,7 +912,9 @@ function renderBonusEmployeeSummary(rows) {
 
 function drawBonusBarChart(svg, config) {
   const pointCount = Math.max(config.points.length, 1);
-  const width = config.orientation === "horizontal" ? 560 : Math.max(520, pointCount * 44);
+  const width = config.orientation === "horizontal"
+    ? Math.max(560, pointCount * 42)
+    : Math.max(520, pointCount * 44);
   const height = 220;
   const pad = config.orientation === "horizontal"
     ? { top: 18, right: 78, bottom: 18, left: 88 }
@@ -1027,6 +1082,43 @@ function drawEmployeePayableChart(svg, summaries) {
     <text x="${width - 78}" y="40" class="chart-label">Line: Employees</text>
     ${labels}`;
   attachBonusTooltips(svg);
+}
+
+function drawEmployeeTeamHistoryChart(svg, rows) {
+  const width = Math.max(520, rows.length * 46);
+  const height = 220;
+  const pad = { top: 18, right: 16, bottom: 42, left: 32 };
+  const innerWidth = width - pad.left - pad.right;
+  const innerHeight = height - pad.top - pad.bottom;
+  const gap = 8;
+  const barWidth = rows.length ? (innerWidth - gap * (rows.length - 1)) / rows.length : innerWidth;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("aria-label", "Employee historical team chart");
+
+  if (!rows.length) {
+    svg.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="chart-label">No team history</text>`;
+    return;
+  }
+
+  const bars = rows.map((row, index) => {
+    const x = pad.left + index * (barWidth + gap);
+    const teamColor = colorForTeam(row.team);
+    return `
+      <rect x="${x}" y="${pad.top}" width="${barWidth}" height="${innerHeight}" rx="5" fill="${teamColor}" opacity="0.84" class="bonus-hover-target" data-tooltip="${escapeAttribute(`${row.monthLabel}: ${row.team || "No Team"}`)}"></rect>
+      <text x="${x + barWidth / 2}" y="${height - 12}" text-anchor="middle" class="chart-label">${escapeHtml(row.monthLabel)}</text>`;
+  }).join("");
+  svg.innerHTML = bars;
+  attachBonusTooltips(svg);
+}
+
+function colorForTeam(team) {
+  const key = normalizeHeader(team);
+  if (key === "dominators") return "#6c44f7";
+  if (key === "wizards") return "#c23eff";
+  if (key === "dodgers") return "#155dff";
+  if (key === "rookie") return "#45caff";
+  if (key === "retainer") return "#f7b733";
+  return "#7b55ff";
 }
 
 function attachBonusTooltips(svg) {

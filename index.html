@@ -111,6 +111,12 @@
               <select id="bonusEndMonth"></select>
             </label>
           </div>
+          <div class="quick-ranges" aria-label="Bonus quick ranges">
+            <button type="button" data-bonus-range="3" class="chip">3 mo</button>
+            <button type="button" data-bonus-range="6" class="chip">6 mo</button>
+            <button type="button" data-bonus-range="12" class="chip active">12 mo</button>
+            <button type="button" data-bonus-range="all" class="chip">All</button>
+          </div>
           <label class="toggle-field">
             <input id="bonusTrendToggle" type="checkbox" />
             <span>Show trend line</span>
@@ -299,6 +305,6 @@
       </article>
     </template>
 
-    <script type="module" src="./src/app.js?v=20260629-bonus-range-team-tooltip"></script>
+    <script type="module" src="./src/app.js?v=20260629-bonus-quick-ranges-team-history"></script>
   </body>
 </html>
