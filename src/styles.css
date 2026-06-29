@@ -211,6 +211,20 @@ button {
   box-shadow: 0 0 0 3px rgba(108, 68, 247, 0.14);
 }
 
+.toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.toggle-field input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--purple);
+}
+
 .range-grid,
 .actions {
   display: grid;
@@ -346,7 +360,7 @@ button {
 }
 
 #bonusSummaryGrid {
-  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, minmax(280px, 1fr));
 }
 
 .metric-card,
@@ -399,16 +413,73 @@ button {
   line-height: 1.35;
 }
 
-.bonus-metric-card {
-  min-height: 118px;
+.bonus-tile {
+  display: grid;
+  gap: 12px;
+  min-height: 300px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 
-.bonus-metric-card strong {
-  font-size: 24px;
+.bonus-tile-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.bonus-metric-card small {
-  font-size: 13px;
+.bonus-tile h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.bonus-tile-body {
+  min-height: 220px;
+}
+
+.bonus-tile-body svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.bonus-latest-month {
+  display: block;
+  margin-bottom: 14px;
+  color: var(--purple);
+  font-size: 34px;
+  font-weight: 600;
+}
+
+.bonus-detail-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.bonus-detail-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.bonus-detail-list dt,
+.bonus-detail-list dd {
+  margin: 0;
+}
+
+.bonus-detail-list dt {
+  color: var(--muted);
+}
+
+.bonus-detail-list dd {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .insights {
@@ -538,6 +609,23 @@ button {
   fill: var(--ink);
   font-size: 10px;
   font-weight: 600;
+}
+
+.trend-line {
+  fill: none;
+  stroke: #1f0961;
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.comparison-line {
+  fill: none;
+  stroke: #155dff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .empty-state {

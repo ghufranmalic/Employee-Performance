@@ -101,6 +101,10 @@
             <input id="bonusEmployeeInput" list="bonusEmployeeOptions" type="search" autocomplete="off" placeholder="Type username or name" />
             <datalist id="bonusEmployeeOptions"></datalist>
           </label>
+          <label class="toggle-field">
+            <input id="bonusTrendToggle" type="checkbox" />
+            <span>Show trend line</span>
+          </label>
         </form>
 
         <div id="statusPanel" class="status-panel">
@@ -214,7 +218,7 @@
           <section class="charts-header">
             <div>
               <p class="eyebrow">Historical trends</p>
-              <h3>Bonus graphs</h3>
+              <h3>Employee count vs payable</h3>
             </div>
             <p id="bonusCoverageText" class="muted">No bonus data loaded yet.</p>
           </section>

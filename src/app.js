@@ -85,6 +85,7 @@ const els = {
   bonusLoadBtn: document.querySelector("#bonusLoadBtn"),
   bonusEmployeeInput: document.querySelector("#bonusEmployeeInput"),
   bonusEmployeeOptions: document.querySelector("#bonusEmployeeOptions"),
+  bonusTrendToggle: document.querySelector("#bonusTrendToggle"),
   bonusEmployeeName: document.querySelector("#bonusEmployeeName"),
   bonusEmployeeMeta: document.querySelector("#bonusEmployeeMeta"),
   bonusPayableValue: document.querySelector("#bonusPayableValue"),
@@ -129,6 +130,7 @@ els.bonusEmployeeInput.addEventListener("keydown", (event) => {
     selectTypedBonusEmployee();
   }
 });
+els.bonusTrendToggle.addEventListener("change", renderBonusDashboard);
 
 els.bonusSheetUrl.value = BONUS_SHEET_URL;
 
@@ -572,6 +574,7 @@ function bonusMonthSummaries() {
       salesQa: sumRows(rows, "salesQa"),
       finalTeamBonus: sumRows(rows, "finalTeamBonus"),
       employeeCount: activeRows.length,
+      cpbCount: rows.filter((row) => row.cpb).length,
       teamCounts
     };
   }).filter((summary) => summary.rows.length);
@@ -588,31 +591,6 @@ function formatTeamCounts(teamCounts) {
     ...Object.keys(teamCounts).filter((team) => !preferred.includes(team)).sort()
   ];
   return keys.map((team) => `${team}: ${teamCounts[team]}`).join(", ");
-}
-
-function bonusTrendCard(label, summaries, key, unit, color) {
-  const latest = summaries[summaries.length - 1];
-  const previous = summaries[summaries.length - 2];
-  const latestValue = latest ? latest[key] : null;
-  const previousValue = previous ? previous[key] : null;
-  const recent = summaries.slice(-3).map((summary) => summary[key]).filter((value) => Number.isFinite(value));
-  const recentAverage = recent.length ? recent.reduce((sum, value) => sum + value, 0) / recent.length : null;
-  const parts = [];
-
-  if (previous && latestValue !== null && previousValue !== null) {
-    parts.push(`${formatDelta(latestValue - previousValue, unit)} vs ${previous.monthLabel}`);
-  }
-  if (recentAverage !== null && latestValue !== null) {
-    parts.push(`${formatDelta(latestValue - recentAverage, unit)} vs 3-mo avg`);
-  }
-
-  return {
-    label,
-    value: latestValue,
-    unit,
-    detail: parts.join(" | ") || (latest ? `Latest in ${latest.monthLabel}` : "No latest month"),
-    color
-  };
 }
 
 function bonusChartSummary(id, label, unit, color, points) {
@@ -702,15 +680,8 @@ function renderBonusDashboard() {
   els.bonusPayableValue.textContent = latest ? formatValue(latest.payable, "money") : "--";
   els.bonusCoverageText.textContent = `Loaded ${summaries.length} month tabs and ${state.bonusEmployees.size} employees. Select an employee for individual breakdown.`;
 
-  renderBonusSummaryCards([
-    { label: "Latest Month", value: latest?.monthLabel ?? "--", unit: "text", detail: latest ? formatTeamCounts(latest.teamCounts) : "No latest month", color: "#7b55ff" },
-    bonusTrendCard("Payable Trend", summaries, "payable", "money", "#7b55ff"),
-    bonusTrendCard("Sales + QA Trend", summaries, "salesQa", "money", "#4b8dff"),
-    bonusTrendCard("Team Bonus Trend", summaries, "finalTeamBonus", "money", "#c23eff"),
-    bonusTrendCard("Employees", summaries, "employeeCount", "count", "#155dff"),
-    { label: "CPB Employees", value: latest ? latest.rows.filter((row) => row.cpb).length : null, unit: "count", detail: latest ? `In ${latest.monthLabel}` : "No latest month", color: "#f7b733" }
-  ]);
-  renderBonusCharts(summaries);
+  renderBonusTiles(summaries);
+  renderBonusComparisonChart(summaries);
 
   if (selectedEmployee) {
     renderBonusHistory(bonusRowsForEmployee(state.selectedBonusUser), selectedEmployee);
@@ -728,39 +699,76 @@ function renderBonusEmpty(message) {
   els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">Select an employee to begin.</td></tr>';
 }
 
-function renderBonusSummaryCards(cards) {
+function renderBonusTiles(summaries) {
   els.bonusSummaryGrid.innerHTML = "";
-  const template = document.querySelector("#metricCardTemplate");
-  cards.forEach((card) => {
-    const node = template.content.firstElementChild.cloneNode(true);
-    node.classList.add("bonus-metric-card");
-    node.querySelector(".metric-dot").style.background = card.color;
-    node.querySelector(".metric-head p").textContent = card.label;
-    node.querySelector("strong").textContent = card.unit === "text" ? card.value : formatValue(card.value, card.unit);
-    node.querySelector("small").textContent = card.detail;
+  const latest = summaries[summaries.length - 1];
+  const tiles = [
+    { type: "latest", title: "Latest Month", color: "#7b55ff" },
+    { title: "# of Employees", key: "employeeCount", unit: "count", color: "#155dff", orientation: "vertical" },
+    { title: "# of CPB Employees", key: "cpbCount", unit: "count", color: "#f7b733", orientation: "vertical" },
+    { title: "Sales + QA Monthly Sum", key: "salesQa", unit: "money", color: "#4b8dff", orientation: "vertical" },
+    { title: "Final Team Bonus Monthly Sum", key: "finalTeamBonus", unit: "money", color: "#c23eff", orientation: "vertical" },
+    { title: "Payable Month Wise", key: "payable", unit: "money", color: "#7b55ff", orientation: "horizontal" }
+  ];
+
+  tiles.forEach((tile) => {
+    const node = document.createElement("article");
+    node.className = "bonus-tile";
+    node.innerHTML = `
+      <div class="bonus-tile-head">
+        <div>
+          <p class="eyebrow">${escapeHtml(tile.type === "latest" ? "Overview" : "Monthly")}</p>
+          <h4>${escapeHtml(tile.title)}</h4>
+        </div>
+      </div>
+      <div class="bonus-tile-body"></div>`;
+    const body = node.querySelector(".bonus-tile-body");
+
+    if (tile.type === "latest") {
+      body.innerHTML = latest ? `
+        <strong class="bonus-latest-month">${escapeHtml(latest.monthLabel)}</strong>
+        <dl class="bonus-detail-list">
+          <div><dt># of Employees</dt><dd>${escapeHtml(formatValue(latest.employeeCount, "count"))}</dd></div>
+          <div><dt># of CPB Employees</dt><dd>${escapeHtml(formatValue(latest.cpbCount, "count"))}</dd></div>
+          <div><dt>Sales + QA</dt><dd>${escapeHtml(formatValue(latest.salesQa, "money"))}</dd></div>
+          <div><dt>Final Team Bonus</dt><dd>${escapeHtml(formatValue(latest.finalTeamBonus, "money"))}</dd></div>
+          <div><dt>Payable</dt><dd>${escapeHtml(formatValue(latest.payable, "money"))}</dd></div>
+        </dl>` : '<div class="empty-state">No latest month.</div>';
+    } else {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("role", "img");
+      body.append(svg);
+      drawBonusBarChart(svg, {
+        title: tile.title,
+        key: tile.key,
+        unit: tile.unit,
+        color: tile.color,
+        orientation: tile.orientation,
+        points: summaries.map((summary) => ({
+          month: summary.monthKey,
+          label: summary.monthLabel,
+          value: summary[tile.key],
+          details: `${summary.monthLabel}: ${formatValue(summary[tile.key], tile.unit)}`
+        })),
+        showTrend: els.bonusTrendToggle.checked
+      });
+    }
+
     els.bonusSummaryGrid.append(node);
   });
 }
 
-function renderBonusCharts(monthSummaries) {
+function renderBonusComparisonChart(monthSummaries) {
   els.bonusChartsGrid.innerHTML = "";
-  const summaries = [
-    bonusChartSummary("payable", "Total Payable", "money", "#7b55ff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.payable }))),
-    bonusChartSummary("sales-qa", "Total Sales + QA", "money", "#4b8dff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.salesQa }))),
-    bonusChartSummary("team-bonus", "Total Final Team Bonus", "money", "#c23eff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.finalTeamBonus }))),
-    bonusChartSummary("employee-count", "# of Employees", "count", "#155dff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.employeeCount })))
-  ];
   const template = document.querySelector("#chartTemplate");
-  summaries.forEach((summary, index) => {
-    const node = template.content.firstElementChild.cloneNode(true);
-    if (index === 0) node.classList.add("wide-chart");
-    node.querySelector(".eyebrow").textContent = "Bonus";
-    node.querySelector("h4").textContent = summary.tab.label;
-    node.querySelector(".trend-pill").textContent = summary.changeText;
-    const svg = node.querySelector("svg");
-    els.bonusChartsGrid.append(node);
-    drawSvgChart(svg, summary);
-  });
+  const node = template.content.firstElementChild.cloneNode(true);
+  node.classList.add("wide-chart");
+  node.querySelector(".eyebrow").textContent = "Bonus";
+  node.querySelector("h4").textContent = "# of Employees vs Total Payable";
+  node.querySelector(".trend-pill").textContent = "All months";
+  const svg = node.querySelector("svg");
+  els.bonusChartsGrid.append(node);
+  drawEmployeePayableChart(svg, monthSummaries);
 }
 
 function renderBonusHistory(rows, employee) {
@@ -785,6 +793,139 @@ function renderBonusHistory(rows, employee) {
       <td>${escapeHtml(formatValue(row.payable, "money"))}</td>
       <td>${escapeHtml(row.status)}</td>
     </tr>`).join("");
+}
+
+function drawBonusBarChart(svg, config) {
+  const width = 520;
+  const height = 220;
+  const pad = config.orientation === "horizontal"
+    ? { top: 18, right: 78, bottom: 18, left: 88 }
+    : { top: 18, right: 14, bottom: 42, left: 54 };
+  const points = config.points.filter((point) => Number.isFinite(point.value));
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("aria-label", `${config.title} bar chart`);
+
+  if (!points.length) {
+    svg.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="chart-label">No data</text>`;
+    return;
+  }
+
+  const shown = points.slice(-12);
+  const maxValue = Math.max(...shown.map((point) => point.value), 1);
+  const innerWidth = width - pad.left - pad.right;
+  const innerHeight = height - pad.top - pad.bottom;
+
+  if (config.orientation === "horizontal") {
+    const rowGap = 5;
+    const rowHeight = (innerHeight - rowGap * (shown.length - 1)) / shown.length;
+    const bars = shown.map((point, index) => {
+      const y = pad.top + index * (rowHeight + rowGap);
+      const barWidth = (point.value / maxValue) * innerWidth;
+      return `
+        <text x="${pad.left - 8}" y="${y + rowHeight * 0.72}" text-anchor="end" class="chart-label">${escapeHtml(point.label)}</text>
+        <rect x="${pad.left}" y="${y}" width="${barWidth}" height="${rowHeight}" rx="4" fill="${config.color}" opacity="0.72">
+          <title>${escapeHtml(point.details)}</title>
+        </rect>
+        <text x="${pad.left + barWidth + 6}" y="${y + rowHeight * 0.72}" class="chart-value-label">${escapeHtml(formatChartValue(point.value, config.unit))}</text>`;
+    }).join("");
+    svg.innerHTML = bars + trendLineForBars(shown, config, pad, innerWidth, innerHeight, true);
+    return;
+  }
+
+  const gap = 7;
+  const barWidth = (innerWidth - gap * (shown.length - 1)) / shown.length;
+  const labels = shown.map((point, index) => {
+    if (index % Math.ceil(shown.length / 4) !== 0 && index !== shown.length - 1) return "";
+    const x = pad.left + index * (barWidth + gap) + barWidth / 2;
+    return `<text x="${x}" y="${height - 12}" text-anchor="middle" class="chart-label">${escapeHtml(point.label)}</text>`;
+  }).join("");
+  const bars = shown.map((point, index) => {
+    const barHeight = (point.value / maxValue) * innerHeight;
+    const x = pad.left + index * (barWidth + gap);
+    const y = pad.top + innerHeight - barHeight;
+    const shouldLabel = index === 0 || index === shown.length - 1 || point.value === maxValue;
+    return `
+      <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="${config.color}" opacity="0.72">
+        <title>${escapeHtml(point.details)}</title>
+      </rect>
+      ${shouldLabel ? `<text x="${x + barWidth / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" class="chart-value-label">${escapeHtml(formatChartValue(point.value, config.unit))}</text>` : ""}`;
+  }).join("");
+  svg.innerHTML = `
+    <line x1="${pad.left}" y1="${pad.top + innerHeight}" x2="${pad.left + innerWidth}" y2="${pad.top + innerHeight}" class="chart-axis" />
+    ${bars}
+    ${trendLineForBars(shown, config, pad, innerWidth, innerHeight, false)}
+    ${labels}`;
+}
+
+function trendLineForBars(points, config, pad, innerWidth, innerHeight, horizontal) {
+  if (!config.showTrend || points.length < 2) return "";
+  const maxValue = Math.max(...points.map((point) => point.value), 1);
+  if (horizontal) {
+    const rowGap = 5;
+    const rowHeight = (innerHeight - rowGap * (points.length - 1)) / points.length;
+    const linePoints = points.map((point, index) => {
+      const x = pad.left + (point.value / maxValue) * innerWidth;
+      const y = pad.top + index * (rowHeight + rowGap) + rowHeight / 2;
+      return `${x},${y}`;
+    });
+    return `<polyline points="${linePoints.join(" ")}" class="trend-line" />`;
+  }
+
+  const gap = 7;
+  const barWidth = (innerWidth - gap * (points.length - 1)) / points.length;
+  const linePoints = points.map((point, index) => {
+    const x = pad.left + index * (barWidth + gap) + barWidth / 2;
+    const y = pad.top + innerHeight - (point.value / maxValue) * innerHeight;
+    return `${x},${y}`;
+  });
+  return `<polyline points="${linePoints.join(" ")}" class="trend-line" />`;
+}
+
+function drawEmployeePayableChart(svg, summaries) {
+  const width = 900;
+  const height = 320;
+  const pad = { top: 26, right: 86, bottom: 42, left: 58 };
+  const points = summaries.filter((summary) => Number.isFinite(summary.employeeCount) && Number.isFinite(summary.payable));
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("aria-label", "Employee count vs total payable chart");
+  if (!points.length) {
+    svg.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="chart-label">No data</text>`;
+    return;
+  }
+
+  const innerWidth = width - pad.left - pad.right;
+  const innerHeight = height - pad.top - pad.bottom;
+  const maxPayable = Math.max(...points.map((point) => point.payable), 1);
+  const maxEmployees = Math.max(...points.map((point) => point.employeeCount), 1);
+  const gap = 5;
+  const barWidth = (innerWidth - gap * (points.length - 1)) / points.length;
+  const xFor = (index) => pad.left + index * (barWidth + gap) + barWidth / 2;
+  const yPayable = (value) => pad.top + innerHeight - (value / maxPayable) * innerHeight;
+  const yEmployees = (value) => pad.top + innerHeight - (value / maxEmployees) * innerHeight;
+  const bars = points.map((point, index) => {
+    const h = (point.payable / maxPayable) * innerHeight;
+    const x = pad.left + index * (barWidth + gap);
+    const y = pad.top + innerHeight - h;
+    return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" fill="#7b55ff" opacity="0.36">
+      <title>${escapeHtml(`${point.monthLabel}: Payable ${formatValue(point.payable, "money")} | Employees ${point.employeeCount}`)}</title>
+    </rect>`;
+  }).join("");
+  const employeeLine = points.map((point, index) => `${xFor(index)},${yEmployees(point.employeeCount)}`).join(" ");
+  const labels = points.map((point, index) => {
+    if (index % Math.ceil(points.length / 6) !== 0 && index !== points.length - 1) return "";
+    return `<text x="${xFor(index)}" y="${height - 12}" text-anchor="middle" class="chart-label">${escapeHtml(point.monthLabel)}</text>`;
+  }).join("");
+  const latest = points[points.length - 1];
+  svg.innerHTML = `
+    <line x1="${pad.left}" y1="${pad.top + innerHeight}" x2="${pad.left + innerWidth}" y2="${pad.top + innerHeight}" class="chart-axis" />
+    ${bars}
+    <polyline points="${employeeLine}" class="comparison-line" />
+    <circle cx="${xFor(points.length - 1)}" cy="${yEmployees(latest.employeeCount)}" r="4" fill="#155dff">
+      <title>${escapeHtml(`${latest.monthLabel}: ${latest.employeeCount} employees`)}</title>
+    </circle>
+    <text x="${width - 78}" y="22" class="chart-label">Bars: Payable</text>
+    <text x="${width - 78}" y="40" class="chart-label">Line: Employees</text>
+    ${labels}`;
 }
 
 function renderSummaryCards(summaries) {
