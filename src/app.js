@@ -350,7 +350,7 @@ async function loadBonusSheet(url) {
   const tabs = bonusMonthTabs();
   const results = await Promise.allSettled(tabs.map((tab) => loadBonusMonthTab(sheetId, tab)));
   const loaded = results.filter((result) => result.status === "fulfilled" && result.value.length).flatMap((result) => result.value);
-  state.bonusRows = loaded.sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  state.bonusRows = trimTrailingDuplicateBonusMonths(loaded).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   state.bonusMonths = [...new Map(state.bonusRows.map((row) => [row.monthKey, { key: row.monthKey, label: row.monthLabel }])).values()]
     .sort((a, b) => a.key.localeCompare(b.key));
   buildBonusEmployeeOptions();
@@ -413,12 +413,9 @@ function valueByHeader(row, headerMap, key) {
 
 function bonusMonthTabs() {
   const tabs = [];
-  const today = new Date();
-  const endYear = today.getFullYear();
-  const endMonth = today.getMonth();
+  const endYear = new Date().getFullYear() + 1;
   for (let year = BONUS_START_YEAR; year <= endYear; year += 1) {
     for (let month = 0; month < 12; month += 1) {
-      if (year === endYear && month > endMonth) break;
       const shortYear = String(year).slice(-2);
       const date = new Date(year, month, 1);
       const name = date.toLocaleString("en-US", { month: "short" });
@@ -430,6 +427,43 @@ function bonusMonthTabs() {
     }
   }
   return tabs;
+}
+
+function trimTrailingDuplicateBonusMonths(rows) {
+  const summaries = [...new Set(rows.map((row) => row.monthKey))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((monthKey) => {
+      const monthRows = rows.filter((row) => row.monthKey === monthKey);
+      return {
+        monthKey,
+        signature: bonusMonthSignature(monthRows)
+      };
+    });
+
+  let latestIndex = summaries.length - 1;
+  while (latestIndex > 0 && summaries[latestIndex].signature === summaries[latestIndex - 1].signature) {
+    latestIndex -= 1;
+  }
+
+  const latestRealMonth = summaries[latestIndex]?.monthKey;
+  return latestRealMonth ? rows.filter((row) => row.monthKey <= latestRealMonth) : rows;
+}
+
+function bonusMonthSignature(rows) {
+  const activeRows = rows.filter((row) => !row.status || !normalizeHeader(row.status).includes("resigned"));
+  const teamCounts = {};
+  activeRows.forEach((row) => {
+    const team = row.team || "No Team";
+    teamCounts[team] = (teamCounts[team] || 0) + 1;
+  });
+  return JSON.stringify({
+    employees: activeRows.length,
+    cpb: rows.filter((row) => row.cpb).length,
+    salesQa: Math.round(sumRows(rows, "salesQa")),
+    finalTeamBonus: Math.round(sumRows(rows, "finalTeamBonus")),
+    payable: Math.round(sumRows(rows, "payable")),
+    teams: Object.keys(teamCounts).sort().map((team) => [team, teamCounts[team]])
+  });
 }
 
 async function loadEmployeeMeta(sheetId) {
