@@ -351,7 +351,8 @@ async function loadBonusSheet(url) {
   const results = await Promise.allSettled(tabs.map((tab) => loadBonusMonthTab(sheetId, tab)));
   const loaded = results.filter((result) => result.status === "fulfilled" && result.value.length).flatMap((result) => result.value);
   state.bonusRows = loaded.sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  state.bonusMonths = [...new Map(state.bonusRows.map((row) => [row.monthKey, { key: row.monthKey, label: row.monthLabel }])).values()];
+  state.bonusMonths = [...new Map(state.bonusRows.map((row) => [row.monthKey, { key: row.monthKey, label: row.monthLabel }])).values()]
+    .sort((a, b) => a.key.localeCompare(b.key));
   buildBonusEmployeeOptions();
   buildBonusMonthOptions();
   renderBonusDashboard();
@@ -573,9 +574,10 @@ function buildBonusEmployeeOptions() {
 }
 
 function buildBonusMonthOptions() {
+  const months = bonusAvailableMonths();
   [els.bonusStartMonth, els.bonusEndMonth].forEach((select) => {
     select.innerHTML = "";
-    state.bonusMonths.forEach((month) => {
+    months.forEach((month) => {
       const option = document.createElement("option");
       option.value = month.key;
       option.textContent = month.label;
@@ -589,13 +591,20 @@ function buildBonusMonthOptions() {
 }
 
 function setBonusDefaultRange(size) {
-  if (!state.bonusMonths.length) return;
-  const end = state.bonusMonths[state.bonusMonths.length - 1];
+  const months = bonusAvailableMonths();
+  if (!months.length) return;
+  const end = months[months.length - 1];
   const start = size === "all"
-    ? state.bonusMonths[0]
-    : state.bonusMonths[Math.max(0, state.bonusMonths.length - size)];
+    ? months[0]
+    : months[Math.max(0, months.length - size)];
   els.bonusStartMonth.value = start.key;
   els.bonusEndMonth.value = end.key;
+}
+
+function bonusAvailableMonths() {
+  return [...state.bonusMonths]
+    .filter((month) => state.bonusRows.some((row) => row.monthKey === month.key))
+    .sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function setActiveBonusRangeButton(range) {
@@ -871,7 +880,6 @@ function renderBonusHistory(rows, employee) {
 
 function renderBonusEmployeeSummary(rows) {
   const cards = [
-    { type: "team-history", label: "Historical Teams", color: "#45caff" },
     { label: "Total OFFs", value: sumRows(rows, "totalOffs"), unit: "count", detail: `${rows.length} selected months`, color: "#155dff" },
     { label: "Sales + QA", value: sumRows(rows, "salesQa"), unit: "money", detail: `${rows.length} selected months`, color: "#4b8dff" },
     { label: "Final Team Bonus", value: sumRows(rows, "finalTeamBonus"), unit: "money", detail: `${rows.length} selected months`, color: "#c23eff" },
@@ -880,26 +888,6 @@ function renderBonusEmployeeSummary(rows) {
   els.bonusEmployeeSummaryGrid.innerHTML = "";
   const template = document.querySelector("#metricCardTemplate");
   cards.forEach((card) => {
-    if (card.type === "team-history") {
-      const node = document.createElement("article");
-      node.className = "bonus-tile employee-team-tile";
-      node.innerHTML = `
-        <div class="bonus-tile-head">
-          <div>
-            <p class="eyebrow">History</p>
-            <h4>${escapeHtml(card.label)}</h4>
-          </div>
-        </div>
-        <div class="bonus-tile-body"></div>`;
-      const body = node.querySelector(".bonus-tile-body");
-      body.classList.toggle("scrollable-chart", rows.length > 18);
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("role", "img");
-      body.append(svg);
-      drawEmployeeTeamHistoryChart(svg, rows);
-      els.bonusEmployeeSummaryGrid.append(node);
-      return;
-    }
     const node = template.content.firstElementChild.cloneNode(true);
     node.classList.add("bonus-employee-card");
     node.querySelector(".metric-dot").style.background = card.color;
@@ -908,6 +896,27 @@ function renderBonusEmployeeSummary(rows) {
     node.querySelector("small").textContent = card.detail;
     els.bonusEmployeeSummaryGrid.append(node);
   });
+  renderEmployeeTeamHistoryTile(rows);
+}
+
+function renderEmployeeTeamHistoryTile(rows) {
+  const node = document.createElement("article");
+  node.className = "bonus-tile employee-team-tile";
+  node.innerHTML = `
+    <div class="bonus-tile-head">
+      <div>
+        <p class="eyebrow">History</p>
+        <h4>Historical Teams</h4>
+      </div>
+    </div>
+    <div class="bonus-tile-body"></div>`;
+  const body = node.querySelector(".bonus-tile-body");
+  body.classList.toggle("scrollable-chart", rows.length > 18);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("role", "img");
+  body.append(svg);
+  drawEmployeeTeamHistoryChart(svg, rows);
+  els.bonusEmployeeSummaryGrid.append(node);
 }
 
 function drawBonusBarChart(svg, config) {
