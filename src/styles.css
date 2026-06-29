@@ -507,6 +507,24 @@ button {
 
 .employee-team-tile {
   grid-column: 1 / -1;
+  min-height: 300px;
+}
+
+.employee-team-tile .bonus-tile-body {
+  min-height: 220px;
+  max-height: 220px;
+}
+
+.employee-team-tile .bonus-tile-body svg {
+  width: auto;
+  max-width: none;
+}
+
+.team-bar-label {
+  fill: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .insights {

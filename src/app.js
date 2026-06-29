@@ -1128,7 +1128,7 @@ function drawEmployeePayableChart(svg, summaries) {
 }
 
 function drawEmployeeTeamHistoryChart(svg, rows) {
-  const width = Math.max(520, rows.length * 46);
+  const width = Math.max(520, rows.length * 64);
   const height = 220;
   const pad = { top: 18, right: 16, bottom: 42, left: 32 };
   const innerWidth = width - pad.left - pad.right;
@@ -1146,8 +1146,12 @@ function drawEmployeeTeamHistoryChart(svg, rows) {
   const bars = rows.map((row, index) => {
     const x = pad.left + index * (barWidth + gap);
     const teamColor = colorForTeam(row.team);
+    const team = row.team || "No Team";
+    const labelX = x + barWidth / 2;
+    const labelY = pad.top + innerHeight / 2;
     return `
-      <rect x="${x}" y="${pad.top}" width="${barWidth}" height="${innerHeight}" rx="5" fill="${teamColor}" opacity="0.84" class="bonus-hover-target" data-tooltip="${escapeAttribute(`${row.monthLabel}: ${row.team || "No Team"}`)}"></rect>
+      <rect x="${x}" y="${pad.top}" width="${barWidth}" height="${innerHeight}" rx="5" fill="${teamColor}" opacity="0.84" class="bonus-hover-target" data-tooltip="${escapeAttribute(`${row.monthLabel}: ${team}`)}"></rect>
+      <text x="${labelX}" y="${labelY}" text-anchor="middle" class="team-bar-label" transform="rotate(-90 ${labelX} ${labelY})">${escapeHtml(team)}</text>
       <text x="${x + barWidth / 2}" y="${height - 12}" text-anchor="middle" class="chart-label">${escapeHtml(row.monthLabel)}</text>`;
   }).join("");
   svg.innerHTML = bars;
