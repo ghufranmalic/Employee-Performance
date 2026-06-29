@@ -115,6 +115,29 @@ button {
   font-weight: 500;
 }
 
+.app-nav {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+.nav-tab {
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--primary);
+  background: #f1edff;
+  font-weight: 500;
+  text-align: left;
+  padding: 0 12px;
+}
+
+.nav-tab.active {
+  color: #ffffff;
+  background: var(--primary);
+}
+
 .brand h1,
 .profile-strip h2,
 .charts-header h3,
@@ -669,6 +692,16 @@ button {
 
 .evaluation-table .low-kpi {
   color: var(--red);
+  font-weight: 600;
+}
+
+.bonus-table {
+  min-width: 1260px;
+}
+
+.bonus-table .cpb-cell {
+  color: var(--primary);
+  background: rgba(247, 183, 51, 0.18);
   font-weight: 600;
 }
 

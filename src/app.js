@@ -1,5 +1,7 @@
 const DEFAULT_SHEET_URL =
   "https://docs.google.com/spreadsheets/d/18o6MwnT0vfyMIV3hm4lKHu6gtpE2Glsivv_LnyR2jO0/edit?gid=890066547#gid=890066547";
+const BONUS_SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/1SMgRCqPI7LXqXi7xcq3k0vfX4ZQiTccRDTTvG5l24Yk/edit?pli=1&gid=195863414#gid=195863414";
 
 const KPI_TABS = [
   { id: "sales", label: "Sales", sheet: "Sales", color: "#4b8dff", unit: "count", aggregate: "sum", targetPerMonth: 600 },
@@ -11,6 +13,7 @@ const KPI_TABS = [
 ];
 
 const ACTUAL_DATA_KPI_IDS = new Set(["sales", "quality", "rt", "tnd", "coins"]);
+const BONUS_START_YEAR = 2022;
 const AUTH_STORAGE_KEY = "employee-performance-authenticated";
 const AUTH_USERS = {
   user1: "9f37f577aad6b6518ea0685b3b96cc94dec6ebb8c66914588cc108ed4ea14e4b",
@@ -31,6 +34,11 @@ const state = {
   selectedUser: "",
   annualAutoRange: true,
   dashboardStarted: false,
+  bonusStarted: false,
+  bonusRows: [],
+  bonusMonths: [],
+  bonusEmployees: new Map(),
+  selectedBonusUser: "",
   diagnostics: []
 };
 
@@ -42,6 +50,10 @@ const els = {
   loginPassword: document.querySelector("#loginPassword"),
   loginError: document.querySelector("#loginError"),
   logoutBtn: document.querySelector("#logoutBtn"),
+  performanceNav: document.querySelector("#performanceNav"),
+  bonusNav: document.querySelector("#bonusNav"),
+  performancePage: document.querySelector("#performancePage"),
+  bonusPage: document.querySelector("#bonusPage"),
   sheetUrl: document.querySelector("#sheetUrl"),
   controls: document.querySelector("#controls"),
   loadBtn: document.querySelector("#loadBtn"),
@@ -67,7 +79,19 @@ const els = {
   downloadEvaluationPdf: document.querySelector("#downloadEvaluationPdf"),
   annualStartMonth: document.querySelector("#annualStartMonth"),
   annualEndMonth: document.querySelector("#annualEndMonth"),
-  refreshEvaluationRange: document.querySelector("#refreshEvaluationRange")
+  refreshEvaluationRange: document.querySelector("#refreshEvaluationRange"),
+  bonusControls: document.querySelector("#bonusControls"),
+  bonusSheetUrl: document.querySelector("#bonusSheetUrl"),
+  bonusLoadBtn: document.querySelector("#bonusLoadBtn"),
+  bonusEmployeeInput: document.querySelector("#bonusEmployeeInput"),
+  bonusEmployeeOptions: document.querySelector("#bonusEmployeeOptions"),
+  bonusEmployeeName: document.querySelector("#bonusEmployeeName"),
+  bonusEmployeeMeta: document.querySelector("#bonusEmployeeMeta"),
+  bonusPayableValue: document.querySelector("#bonusPayableValue"),
+  bonusSummaryGrid: document.querySelector("#bonusSummaryGrid"),
+  bonusCoverageText: document.querySelector("#bonusCoverageText"),
+  bonusChartsGrid: document.querySelector("#bonusChartsGrid"),
+  bonusHistoryBody: document.querySelector("#bonusHistoryBody")
 };
 
 initializeAuth();
@@ -82,10 +106,30 @@ els.logoutBtn.addEventListener("click", () => {
   showLogin();
 });
 
+els.performanceNav.addEventListener("click", () => showPage("performance"));
+els.bonusNav.addEventListener("click", () => showPage("bonus"));
+
 els.controls.addEventListener("submit", (event) => {
   event.preventDefault();
   loadSheet(els.sheetUrl.value.trim());
 });
+
+els.bonusControls.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadBonusSheet(els.bonusSheetUrl.value.trim());
+});
+
+els.bonusEmployeeInput.addEventListener("change", selectTypedBonusEmployee);
+els.bonusEmployeeInput.addEventListener("blur", selectTypedBonusEmployee);
+els.bonusEmployeeInput.addEventListener("input", selectExactBonusEmployee);
+els.bonusEmployeeInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    selectTypedBonusEmployee();
+  }
+});
+
+els.bonusSheetUrl.value = BONUS_SHEET_URL;
 
 els.employeeInput.addEventListener("change", selectTypedEmployee);
 els.employeeInput.addEventListener("blur", selectTypedEmployee);
@@ -156,12 +200,38 @@ function showDashboard() {
   startDashboard();
 }
 
+function showPage(page) {
+  const isBonus = page === "bonus";
+  els.performancePage.classList.toggle("auth-hidden", isBonus);
+  els.bonusPage.classList.toggle("auth-hidden", !isBonus);
+  els.controls.classList.toggle("auth-hidden", isBonus);
+  els.bonusControls.classList.toggle("auth-hidden", !isBonus);
+  els.performanceNav.classList.toggle("active", !isBonus);
+  els.bonusNav.classList.toggle("active", isBonus);
+
+  if (isBonus) {
+    startBonusDashboard();
+    return;
+  }
+
+  setStatus("Loaded", state.employees.size
+    ? `Found ${state.employees.size} employees and ${state.months.length} month columns.`
+    : "Paste a Sheet URL or use the default Employee Performance Profile sheet.");
+}
+
 function startDashboard() {
   if (state.dashboardStarted) return;
   state.dashboardStarted = true;
   els.sheetUrl.value = DEFAULT_SHEET_URL;
   setEmptyControls();
   loadSheet(DEFAULT_SHEET_URL);
+}
+
+function startBonusDashboard() {
+  if (state.bonusStarted) return;
+  state.bonusStarted = true;
+  setBonusEmpty();
+  loadBonusSheet(els.bonusSheetUrl.value.trim() || BONUS_SHEET_URL);
 }
 
 async function handleLogin() {
@@ -240,6 +310,99 @@ async function loadKpiTab(sheetId, tab) {
     state.diagnostics.push(`${tab.label} tab was not readable.`);
     state.kpis.set(tab.id, new Map());
   }
+}
+
+async function loadBonusSheet(url) {
+  const sheetId = extractSheetId(url);
+  if (!sheetId) {
+    setStatus("Could not read Bonus Sheet URL", "Paste a valid Google Sheets URL that includes /d/{sheet-id}/.");
+    return;
+  }
+
+  setStatus("Loading bonus", "Reading month tabs from the bonus sheet...");
+  els.bonusLoadBtn.disabled = true;
+  state.bonusRows = [];
+  state.bonusMonths = [];
+  state.bonusEmployees.clear();
+
+  const tabs = bonusMonthTabs();
+  const results = await Promise.allSettled(tabs.map((tab) => loadBonusMonthTab(sheetId, tab)));
+  const loaded = results.filter((result) => result.status === "fulfilled" && result.value.length).flatMap((result) => result.value);
+  state.bonusRows = loaded.sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  state.bonusMonths = [...new Map(state.bonusRows.map((row) => [row.monthKey, { key: row.monthKey, label: row.monthLabel }])).values()];
+  buildBonusEmployeeOptions();
+  renderBonusDashboard();
+  setStatus("Bonus loaded", `Loaded ${state.bonusRows.length.toLocaleString("en-US")} bonus rows across ${state.bonusMonths.length} month tabs.`);
+  els.bonusLoadBtn.disabled = false;
+}
+
+async function loadBonusMonthTab(sheetId, tab) {
+  try {
+    const table = await querySheet(sheetId, tab.sheet);
+    return tableToRows(table).map((row) => parseBonusRow(row, tab)).filter(Boolean);
+  } catch (error) {
+    return [];
+  }
+}
+
+function parseBonusRow(row, tab) {
+  const headerMap = new Map(row.headers.map((header, index) => [normalizeHeader(header), index]));
+  const firstValue = cleanCell(row.values[0]);
+  const tag = normalizeHeader(firstValue);
+  const cpb = tag === "cpb" || tag.includes("consistence performance bonus");
+  const offset = cpb || !valueByHeader(row, headerMap, "name") ? 1 : 0;
+  const name = valueByHeader(row, headerMap, "name") || cleanCell(row.values[offset]);
+  const username = normalizeUser(valueByHeader(row, headerMap, "username") || row.values[offset + 1]);
+
+  if (!username || username === "username") return null;
+
+  const record = {
+    monthKey: tab.key,
+    monthLabel: tab.label,
+    cpb,
+    name,
+    username,
+    salesQa: parseMoney(valueByHeader(row, headerMap, "sales qa") || row.values[offset + 2]),
+    teamBonus: parseMoney(valueByHeader(row, headerMap, "team bonus") || row.values[offset + 3]),
+    dependability: parseMetric(valueByHeader(row, headerMap, "dependability") || row.values[offset + 4], "percent"),
+    finalTeamBonus: parseMoney(valueByHeader(row, headerMap, "final team bonus") || row.values[offset + 5]),
+    otherOffs: parseNumber(valueByHeader(row, headerMap, "other offs") || row.values[offset + 6]),
+    unpaidNoShows: parseNumber(valueByHeader(row, headerMap, "unpaids no shows") || row.values[offset + 7]),
+    totalOffs: parseNumber(valueByHeader(row, headerMap, "total offs") || row.values[offset + 8]),
+    compensation: parseMoney(valueByHeader(row, headerMap, "compensation") || row.values[offset + 9]),
+    team: valueByHeader(row, headerMap, "teams") || valueByHeader(row, headerMap, "team") || cleanCell(row.values[offset + 10]),
+    payable: parseMoney(valueByHeader(row, headerMap, "payable") || row.values[offset + 11]),
+    status: valueByHeader(row, headerMap, "emp status") || cleanCell(row.values[offset + 12])
+  };
+
+  const employee = state.bonusEmployees.get(username) || { username, name: record.name };
+  employee.name = record.name || employee.name;
+  employee.latestTeam = record.team || employee.latestTeam;
+  state.bonusEmployees.set(username, employee);
+  return record;
+}
+
+function valueByHeader(row, headerMap, key) {
+  const index = headerMap.get(normalizeHeader(key));
+  return index === undefined ? "" : cleanCell(row.values[index]);
+}
+
+function bonusMonthTabs() {
+  const tabs = [];
+  const endYear = new Date().getFullYear() + 1;
+  for (let year = BONUS_START_YEAR; year <= endYear; year += 1) {
+    for (let month = 0; month < 12; month += 1) {
+      const shortYear = String(year).slice(-2);
+      const date = new Date(year, month, 1);
+      const name = date.toLocaleString("en-US", { month: "short" });
+      tabs.push({
+        sheet: `${name}${shortYear}`,
+        key: `${year}-${String(month + 1).padStart(2, "0")}`,
+        label: `${name} '${shortYear}`
+      });
+    }
+  }
+  return tabs;
 }
 
 async function loadEmployeeMeta(sheetId) {
@@ -369,6 +532,57 @@ function buildEmployeeOptions() {
   els.employeeInput.value = employees[0] ? employees[0].username : "";
 }
 
+function buildBonusEmployeeOptions() {
+  const employees = [...state.bonusEmployees.values()].sort((a, b) => displayName(a).localeCompare(displayName(b)));
+  els.bonusEmployeeOptions.innerHTML = "";
+  employees.forEach((employee) => {
+    const option = document.createElement("option");
+    option.value = employee.username;
+    option.label = displayName(employee) === employee.username ? employee.username : `${displayName(employee)} (${employee.username})`;
+    els.bonusEmployeeOptions.append(option);
+  });
+
+  state.selectedBonusUser = employees[0] ? normalizeUser(employees[0].username) : "";
+  els.bonusEmployeeInput.value = employees[0] ? employees[0].username : "";
+}
+
+function bonusRowsForEmployee(username) {
+  return state.bonusRows
+    .filter((row) => row.username === username)
+    .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+}
+
+function bonusTeamCountPoints() {
+  return state.bonusMonths.map((month) => {
+    const usernames = new Set(state.bonusRows
+      .filter((row) => row.monthKey === month.key && (!row.status || !normalizeHeader(row.status).includes("resigned")))
+      .map((row) => row.username));
+    return { month: month.key, label: month.label, value: usernames.size };
+  }).filter((point) => point.value);
+}
+
+function bonusChartSummary(id, label, unit, color, points) {
+  const cleanPoints = points
+    .filter((point) => point.value !== null && point.value !== undefined && !Number.isNaN(point.value))
+    .sort((a, b) => a.month.localeCompare(b.month));
+  const first = cleanPoints.length ? cleanPoints[0].value : null;
+  const latest = cleanPoints.length ? cleanPoints[cleanPoints.length - 1].value : null;
+  const delta = first !== null && latest !== null ? latest - first : 0;
+  return {
+    tab: { id, label, unit, color },
+    points: cleanPoints,
+    latest,
+    first,
+    average: null,
+    total: null,
+    rangeValue: latest,
+    scoreValue: latest,
+    delta,
+    rangeLabel: "Latest",
+    changeText: cleanPoints.length > 1 ? formatDelta(delta, unit) : "No trend"
+  };
+}
+
 function buildMonthOptions() {
   state.months.sort((a, b) => a.key.localeCompare(b.key));
   const months = selectableMonths();
@@ -414,6 +628,108 @@ function renderDashboard() {
   renderSummaryCards(summaries);
   renderInsights(summaries);
   renderCharts(summaries);
+}
+
+function renderBonusDashboard() {
+  if (!state.bonusRows.length) {
+    renderBonusEmpty("No bonus rows loaded yet.");
+    return;
+  }
+
+  const employee = state.bonusEmployees.get(state.selectedBonusUser) || [...state.bonusEmployees.values()][0];
+  if (!employee) {
+    renderBonusEmpty("No bonus employees found.");
+    return;
+  }
+
+  state.selectedBonusUser = normalizeUser(employee.username);
+  els.bonusEmployeeInput.value = employee.username;
+  const rows = bonusRowsForEmployee(state.selectedBonusUser);
+  const latest = rows[rows.length - 1];
+  const totalPayable = rows.reduce((sum, row) => sum + valueOrZero(row.payable), 0);
+  const cpbMonths = rows.filter((row) => row.cpb).length;
+  const teams = [...new Set(rows.map((row) => row.team).filter(Boolean))];
+
+  els.bonusEmployeeName.textContent = employee.name || employee.username;
+  els.bonusEmployeeMeta.textContent = latest
+    ? `Username: ${employee.username} | Latest Team: ${latest.team || "--"} | Months: ${rows.length}`
+    : "No monthly rows for this employee.";
+  els.bonusPayableValue.textContent = latest ? formatValue(latest.payable, "money") : "--";
+  els.bonusCoverageText.textContent = `Loaded ${state.bonusMonths.length} month tabs and ${state.bonusEmployees.size} employees.`;
+
+  renderBonusSummaryCards([
+    { label: "Total Payable", value: totalPayable, unit: "money", detail: `Across ${rows.length} months`, color: "#7b55ff" },
+    { label: "Latest Total OFFs", value: latest?.totalOffs ?? null, unit: "count", detail: latest ? latest.monthLabel : "No latest row", color: "#155dff" },
+    { label: "Latest Sales + QA", value: latest?.salesQa ?? null, unit: "money", detail: latest ? latest.monthLabel : "No latest row", color: "#4b8dff" },
+    { label: "Latest Team Bonus", value: latest?.finalTeamBonus ?? null, unit: "money", detail: latest ? latest.monthLabel : "No latest row", color: "#c23eff" },
+    { label: "CPB Months", value: cpbMonths, unit: "count", detail: "Consistence Performance Bonus", color: "#f7b733" },
+    { label: "Teams", value: teams.length, unit: "count", detail: teams.join(", ") || "No team history", color: "#45caff" }
+  ]);
+  renderBonusCharts(rows);
+  renderBonusHistory(rows);
+}
+
+function renderBonusEmpty(message) {
+  els.bonusEmployeeName.textContent = "Select an employee";
+  els.bonusEmployeeMeta.textContent = message;
+  els.bonusPayableValue.textContent = "--";
+  els.bonusSummaryGrid.innerHTML = "";
+  els.bonusChartsGrid.innerHTML = '<div class="empty-state">No bonus values found.</div>';
+  els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">Select an employee to begin.</td></tr>';
+}
+
+function renderBonusSummaryCards(cards) {
+  els.bonusSummaryGrid.innerHTML = "";
+  const template = document.querySelector("#metricCardTemplate");
+  cards.forEach((card) => {
+    const node = template.content.firstElementChild.cloneNode(true);
+    node.querySelector(".metric-dot").style.background = card.color;
+    node.querySelector(".metric-head p").textContent = card.label;
+    node.querySelector("strong").textContent = formatValue(card.value, card.unit);
+    node.querySelector("small").textContent = card.detail;
+    els.bonusSummaryGrid.append(node);
+  });
+}
+
+function renderBonusCharts(employeeRows) {
+  els.bonusChartsGrid.innerHTML = "";
+  const summaries = [
+    bonusChartSummary("payable", "Payable", "money", "#7b55ff", employeeRows.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.payable }))),
+    bonusChartSummary("team-count", "Total Team Count", "count", "#155dff", bonusTeamCountPoints()),
+    bonusChartSummary("offs", "Total OFFs", "count", "#c23eff", employeeRows.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.totalOffs }))),
+    bonusChartSummary("sales-qa", "Sales + QA", "money", "#4b8dff", employeeRows.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.salesQa })))
+  ];
+  const template = document.querySelector("#chartTemplate");
+  summaries.forEach((summary) => {
+    const node = template.content.firstElementChild.cloneNode(true);
+    node.querySelector(".eyebrow").textContent = "Bonus";
+    node.querySelector("h4").textContent = summary.tab.label;
+    node.querySelector(".trend-pill").textContent = summary.changeText;
+    const svg = node.querySelector("svg");
+    els.bonusChartsGrid.append(node);
+    drawSvgChart(svg, summary);
+  });
+}
+
+function renderBonusHistory(rows) {
+  if (!rows.length) {
+    els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">No rows for this employee.</td></tr>';
+    return;
+  }
+
+  els.bonusHistoryBody.innerHTML = [...rows].reverse().map((row) => `
+    <tr>
+      <td>${escapeHtml(row.monthLabel)}</td>
+      <td>${escapeHtml(row.name)}</td>
+      <td>${escapeHtml(row.username)}</td>
+      <td class="${row.cpb ? "cpb-cell" : ""}">${row.cpb ? "CPB" : "--"}</td>
+      <td>${escapeHtml(row.team)}</td>
+      <td>${escapeHtml(formatValue(row.totalOffs, "count"))}</td>
+      <td>${escapeHtml(formatValue(row.salesQa, "money"))}</td>
+      <td>${escapeHtml(formatValue(row.finalTeamBonus, "money"))}</td>
+      <td>${escapeHtml(formatValue(row.payable, "money"))}</td>
+      <td>${escapeHtml(row.status)}</td>
+    </tr>`).join("");
 }
 
 function renderSummaryCards(summaries) {
@@ -976,6 +1292,23 @@ function parseMetric(value, unit) {
   return number;
 }
 
+function parseMoney(value) {
+  return parseNumber(value);
+}
+
+function parseNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return value;
+  const text = String(value).replace(/,/g, "").replace(/[^\d.-]/g, "").trim();
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isNaN(number) ? null : number;
+}
+
+function valueOrZero(value) {
+  return Number.isFinite(value) ? value : 0;
+}
+
 function monthsForEmployee(username) {
   const months = new Set();
   state.kpis.forEach((rows) => {
@@ -1066,9 +1399,40 @@ function selectExactEmployee() {
   renderDashboard();
 }
 
+function selectTypedBonusEmployee() {
+  const typed = normalizeUser(els.bonusEmployeeInput.value);
+  if (!typed || typed === "loading employees...") return;
+  const employee = findBonusEmployee(typed);
+  if (!employee) {
+    setStatus("Employee not found", `No bonus username or name matched "${els.bonusEmployeeInput.value}".`);
+    return;
+  }
+  state.selectedBonusUser = normalizeUser(employee.username);
+  els.bonusEmployeeInput.value = employee.username;
+  renderBonusDashboard();
+}
+
+function selectExactBonusEmployee() {
+  const typed = normalizeUser(els.bonusEmployeeInput.value);
+  if (!typed || !state.bonusEmployees.has(typed) || typed === state.selectedBonusUser) return;
+  const employee = state.bonusEmployees.get(typed);
+  state.selectedBonusUser = typed;
+  els.bonusEmployeeInput.value = employee.username;
+  renderBonusDashboard();
+}
+
 function findEmployee(value) {
   if (state.employees.has(value)) return state.employees.get(value);
   return [...state.employees.values()].find((employee) => {
+    const username = normalizeUser(employee.username);
+    const name = normalizeUser(employee.name);
+    return username.includes(value) || name.includes(value);
+  });
+}
+
+function findBonusEmployee(value) {
+  if (state.bonusEmployees.has(value)) return state.bonusEmployees.get(value);
+  return [...state.bonusEmployees.values()].find((employee) => {
     const username = normalizeUser(employee.username);
     const name = normalizeUser(employee.name);
     return username.includes(value) || name.includes(value);
@@ -1136,12 +1500,14 @@ function cleanCell(value) {
 
 function formatValue(value, unit) {
   if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  if (unit === "money") return formatMoney(value);
   if (unit === "percent") return `${value.toFixed(2)}%`;
   return Math.round(value).toLocaleString("en-US");
 }
 
 function formatChartValue(value, unit) {
   if (value === null || value === undefined || Number.isNaN(value)) return "";
+  if (unit === "money") return formatCompactMoney(value);
   if (unit === "percent") return `${value.toFixed(1)}%`;
   return Math.round(value).toLocaleString("en-US");
 }
@@ -1152,8 +1518,22 @@ function formatScore(value) {
 
 function formatDelta(value, unit) {
   const sign = value > 0 ? "+" : "";
+  if (unit === "money") return `${sign}${formatMoney(Math.abs(value))}`;
   if (unit === "percent") return `${sign}${value.toFixed(2)} pts`;
   return `${sign}${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function formatMoney(value) {
+  const sign = value < 0 ? "-" : "";
+  return `${sign}${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+function formatCompactMoney(value) {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 1000000) return `${sign}${(abs / 1000000).toFixed(1)}M`;
+  if (abs >= 1000) return `${sign}${(abs / 1000).toFixed(1)}K`;
+  return formatMoney(value);
 }
 
 function clamp(value, min, max) {
@@ -1167,6 +1547,14 @@ function setEmptyControls() {
   els.endMonth.innerHTML = "<option>--</option>";
   els.annualStartMonth.innerHTML = "<option>--</option>";
   els.annualEndMonth.innerHTML = "<option>--</option>";
+}
+
+function setBonusEmpty() {
+  els.bonusEmployeeInput.value = "Loading employees...";
+  els.bonusEmployeeOptions.innerHTML = "";
+  els.bonusSummaryGrid.innerHTML = "";
+  els.bonusChartsGrid.innerHTML = "";
+  els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">Loading bonus rows...</td></tr>';
 }
 
 function renderEmpty() {

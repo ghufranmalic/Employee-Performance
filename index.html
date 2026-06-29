@@ -39,7 +39,12 @@
           <button id="logoutBtn" class="logout-btn" type="button">Logout</button>
         </div>
 
-        <form id="controls" class="controls">
+        <nav class="app-nav" aria-label="Dashboard pages">
+          <button id="performanceNav" type="button" class="nav-tab active">Performance Profile</button>
+          <button id="bonusNav" type="button" class="nav-tab">Bonus Breakdown</button>
+        </nav>
+
+        <form id="controls" class="controls page-controls">
           <label class="field">
             <span>Google Sheet URL</span>
             <input id="sheetUrl" type="url" autocomplete="off" />
@@ -82,6 +87,22 @@
           </div>
         </form>
 
+        <form id="bonusControls" class="controls page-controls auth-hidden">
+          <label class="field">
+            <span>Bonus Sheet URL</span>
+            <input id="bonusSheetUrl" type="url" autocomplete="off" />
+          </label>
+          <button id="bonusLoadBtn" class="primary-btn" type="submit">
+            Load bonus
+          </button>
+
+          <label class="field">
+            <span>Employee</span>
+            <input id="bonusEmployeeInput" list="bonusEmployeeOptions" type="search" autocomplete="off" placeholder="Type username or name" />
+            <datalist id="bonusEmployeeOptions"></datalist>
+          </label>
+        </form>
+
         <div id="statusPanel" class="status-panel">
           <p class="status-title">Ready</p>
           <p id="statusText">Paste a Sheet URL or use the default Employee Performance Profile sheet.</p>
@@ -89,6 +110,7 @@
       </aside>
 
       <main class="workspace">
+        <section id="performancePage" class="dashboard-page">
         <section class="profile-strip">
           <div>
             <p class="eyebrow">Employee profile</p>
@@ -172,6 +194,67 @@
             </table>
           </div>
         </section>
+        </section>
+
+        <section id="bonusPage" class="dashboard-page auth-hidden">
+          <section class="profile-strip">
+            <div>
+              <p class="eyebrow">Bonus breakdown</p>
+              <h2 id="bonusEmployeeName">Select an employee</h2>
+              <p id="bonusEmployeeMeta" class="muted">Load the bonus sheet to begin.</p>
+            </div>
+            <div class="score-block">
+              <span id="bonusPayableValue">--</span>
+              <small>Latest Payable</small>
+            </div>
+          </section>
+
+          <section class="summary-grid" id="bonusSummaryGrid"></section>
+
+          <section class="charts-header">
+            <div>
+              <p class="eyebrow">Historical trends</p>
+              <h3>Bonus graphs</h3>
+            </div>
+            <p id="bonusCoverageText" class="muted">No bonus data loaded yet.</p>
+          </section>
+
+          <section id="bonusChartsGrid" class="charts-grid"></section>
+
+          <section class="annual-evaluation">
+            <div class="annual-header">
+              <div>
+                <p class="eyebrow">Team history</p>
+                <h3>Employee bonus history</h3>
+                <p class="muted">Monthly teams, offs, Sales + QA, Final Team Bonus, Payable, and CPB status.</p>
+              </div>
+            </div>
+
+            <div class="evaluation-table-wrap">
+              <table class="evaluation-table bonus-table">
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Name</th>
+                    <th>Username</th>
+                    <th>CPB</th>
+                    <th>Team</th>
+                    <th>Total OFFs</th>
+                    <th>Sales + QA</th>
+                    <th>Final Team Bonus</th>
+                    <th>Payable</th>
+                    <th>Emp. Status</th>
+                  </tr>
+                </thead>
+                <tbody id="bonusHistoryBody">
+                  <tr>
+                    <td colspan="10" class="evaluation-empty">Select an employee to begin.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
       </main>
     </div>
 
@@ -201,6 +284,6 @@
       </article>
     </template>
 
-    <script type="module" src="./src/app.js?v=20260623-login-gate"></script>
+    <script type="module" src="./src/app.js?v=20260629-bonus-breakdown"></script>
   </body>
 </html>
