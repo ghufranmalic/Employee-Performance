@@ -85,6 +85,8 @@ const els = {
   bonusLoadBtn: document.querySelector("#bonusLoadBtn"),
   bonusEmployeeInput: document.querySelector("#bonusEmployeeInput"),
   bonusEmployeeOptions: document.querySelector("#bonusEmployeeOptions"),
+  bonusStartMonth: document.querySelector("#bonusStartMonth"),
+  bonusEndMonth: document.querySelector("#bonusEndMonth"),
   bonusTrendToggle: document.querySelector("#bonusTrendToggle"),
   bonusEmployeeName: document.querySelector("#bonusEmployeeName"),
   bonusEmployeeMeta: document.querySelector("#bonusEmployeeMeta"),
@@ -93,6 +95,7 @@ const els = {
   bonusCoverageText: document.querySelector("#bonusCoverageText"),
   bonusChartsGrid: document.querySelector("#bonusChartsGrid"),
   bonusHistoryTitle: document.querySelector("#bonusHistoryTitle"),
+  bonusEmployeeSummaryGrid: document.querySelector("#bonusEmployeeSummaryGrid"),
   bonusHistoryBody: document.querySelector("#bonusHistoryBody")
 };
 
@@ -131,6 +134,8 @@ els.bonusEmployeeInput.addEventListener("keydown", (event) => {
   }
 });
 els.bonusTrendToggle.addEventListener("change", renderBonusDashboard);
+els.bonusStartMonth.addEventListener("change", renderBonusDashboard);
+els.bonusEndMonth.addEventListener("change", renderBonusDashboard);
 
 els.bonusSheetUrl.value = BONUS_SHEET_URL;
 
@@ -334,6 +339,7 @@ async function loadBonusSheet(url) {
   state.bonusRows = loaded.sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   state.bonusMonths = [...new Map(state.bonusRows.map((row) => [row.monthKey, { key: row.monthKey, label: row.monthLabel }])).values()];
   buildBonusEmployeeOptions();
+  buildBonusMonthOptions();
   renderBonusDashboard();
   setStatus("Bonus loaded", `Loaded ${state.bonusRows.length.toLocaleString("en-US")} bonus rows across ${state.bonusMonths.length} month tabs.`);
   els.bonusLoadBtn.disabled = false;
@@ -392,9 +398,12 @@ function valueByHeader(row, headerMap, key) {
 
 function bonusMonthTabs() {
   const tabs = [];
-  const endYear = new Date().getFullYear() + 1;
+  const today = new Date();
+  const endYear = today.getFullYear();
+  const endMonth = today.getMonth();
   for (let year = BONUS_START_YEAR; year <= endYear; year += 1) {
     for (let month = 0; month < 12; month += 1) {
+      if (year === endYear && month > endMonth) break;
       const shortYear = String(year).slice(-2);
       const date = new Date(year, month, 1);
       const name = date.toLocaleString("en-US", { month: "short" });
@@ -549,14 +558,40 @@ function buildBonusEmployeeOptions() {
   els.bonusEmployeeInput.value = "";
 }
 
+function buildBonusMonthOptions() {
+  [els.bonusStartMonth, els.bonusEndMonth].forEach((select) => {
+    select.innerHTML = "";
+    state.bonusMonths.forEach((month) => {
+      const option = document.createElement("option");
+      option.value = month.key;
+      option.textContent = month.label;
+      select.append(option);
+    });
+  });
+  if (state.bonusMonths.length) {
+    els.bonusStartMonth.value = state.bonusMonths[0].key;
+    els.bonusEndMonth.value = state.bonusMonths[state.bonusMonths.length - 1].key;
+  }
+}
+
+function getBonusRange() {
+  let start = els.bonusStartMonth.value;
+  let end = els.bonusEndMonth.value;
+  if (!start || !end) return null;
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
 function bonusRowsForEmployee(username) {
+  const range = getBonusRange();
   return state.bonusRows
-    .filter((row) => row.username === username)
+    .filter((row) => row.username === username && (!range || (row.monthKey >= range.start && row.monthKey <= range.end)))
     .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 }
 
 function bonusMonthSummaries() {
-  return state.bonusMonths.map((month) => {
+  const range = getBonusRange();
+  return state.bonusMonths.filter((month) => !range || (month.key >= range.start && month.key <= range.end)).map((month) => {
     const rows = state.bonusRows.filter((row) => row.monthKey === month.key);
     const activeRows = rows.filter((row) => !row.status || !normalizeHeader(row.status).includes("resigned"));
     const teamCounts = {};
@@ -696,7 +731,8 @@ function renderBonusEmpty(message) {
   els.bonusPayableValue.textContent = "--";
   els.bonusSummaryGrid.innerHTML = "";
   els.bonusChartsGrid.innerHTML = '<div class="empty-state">No bonus values found.</div>';
-  els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">Select an employee to begin.</td></tr>';
+  els.bonusEmployeeSummaryGrid.innerHTML = "";
+  els.bonusHistoryBody.innerHTML = '<tr><td colspan="9" class="evaluation-empty">Select an employee to begin.</td></tr>';
 }
 
 function renderBonusTiles(summaries) {
@@ -705,7 +741,7 @@ function renderBonusTiles(summaries) {
   const tiles = [
     { type: "latest", title: "Latest Month", color: "#7b55ff" },
     { title: "# of Employees", key: "employeeCount", unit: "count", color: "#155dff", orientation: "vertical" },
-    { title: "# of CPB Employees", key: "cpbCount", unit: "count", color: "#f7b733", orientation: "vertical" },
+    { type: "teams", title: "Teams Month Wise", color: "#45caff" },
     { title: "Sales + QA Monthly Sum", key: "salesQa", unit: "money", color: "#4b8dff", orientation: "vertical" },
     { title: "Final Team Bonus Monthly Sum", key: "finalTeamBonus", unit: "money", color: "#c23eff", orientation: "vertical" },
     { title: "Payable Month Wise", key: "payable", unit: "money", color: "#7b55ff", orientation: "horizontal" }
@@ -734,6 +770,11 @@ function renderBonusTiles(summaries) {
           <div><dt>Final Team Bonus</dt><dd>${escapeHtml(formatValue(latest.finalTeamBonus, "money"))}</dd></div>
           <div><dt>Payable</dt><dd>${escapeHtml(formatValue(latest.payable, "money"))}</dd></div>
         </dl>` : '<div class="empty-state">No latest month.</div>';
+    } else if (tile.type === "teams") {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("role", "img");
+      body.append(svg);
+      drawTeamBreakdownChart(svg, summaries);
     } else {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("role", "img");
@@ -774,11 +815,13 @@ function renderBonusComparisonChart(monthSummaries) {
 function renderBonusHistory(rows, employee) {
   if (!rows.length) {
     els.bonusHistoryTitle.textContent = "Employee bonus history";
-    els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">Select an employee to see individual bonus history.</td></tr>';
+    els.bonusEmployeeSummaryGrid.innerHTML = "";
+    els.bonusHistoryBody.innerHTML = '<tr><td colspan="9" class="evaluation-empty">Select an employee to see individual bonus history.</td></tr>';
     return;
   }
 
   els.bonusHistoryTitle.textContent = `Employee bonus history: ${employee.name || employee.username}`;
+  renderBonusEmployeeSummary(rows);
 
   els.bonusHistoryBody.innerHTML = [...rows].reverse().map((row) => `
     <tr>
@@ -791,8 +834,27 @@ function renderBonusHistory(rows, employee) {
       <td>${escapeHtml(formatValue(row.salesQa, "money"))}</td>
       <td>${escapeHtml(formatValue(row.finalTeamBonus, "money"))}</td>
       <td>${escapeHtml(formatValue(row.payable, "money"))}</td>
-      <td>${escapeHtml(row.status)}</td>
     </tr>`).join("");
+}
+
+function renderBonusEmployeeSummary(rows) {
+  const cards = [
+    { label: "Total OFFs", value: sumRows(rows, "totalOffs"), unit: "count", detail: `${rows.length} selected months`, color: "#155dff" },
+    { label: "Sales + QA", value: sumRows(rows, "salesQa"), unit: "money", detail: `${rows.length} selected months`, color: "#4b8dff" },
+    { label: "Final Team Bonus", value: sumRows(rows, "finalTeamBonus"), unit: "money", detail: `${rows.length} selected months`, color: "#c23eff" },
+    { label: "Payable", value: sumRows(rows, "payable"), unit: "money", detail: `${rows.length} selected months`, color: "#7b55ff" }
+  ];
+  els.bonusEmployeeSummaryGrid.innerHTML = "";
+  const template = document.querySelector("#metricCardTemplate");
+  cards.forEach((card) => {
+    const node = template.content.firstElementChild.cloneNode(true);
+    node.classList.add("bonus-employee-card");
+    node.querySelector(".metric-dot").style.background = card.color;
+    node.querySelector(".metric-head p").textContent = card.label;
+    node.querySelector("strong").textContent = formatValue(card.value, card.unit);
+    node.querySelector("small").textContent = card.detail;
+    els.bonusEmployeeSummaryGrid.append(node);
+  });
 }
 
 function drawBonusBarChart(svg, config) {
@@ -823,12 +885,11 @@ function drawBonusBarChart(svg, config) {
       const barWidth = (point.value / maxValue) * innerWidth;
       return `
         <text x="${pad.left - 8}" y="${y + rowHeight * 0.72}" text-anchor="end" class="chart-label">${escapeHtml(point.label)}</text>
-        <rect x="${pad.left}" y="${y}" width="${barWidth}" height="${rowHeight}" rx="4" fill="${config.color}" opacity="0.72">
-          <title>${escapeHtml(point.details)}</title>
-        </rect>
+        <rect x="${pad.left}" y="${y}" width="${barWidth}" height="${rowHeight}" rx="4" fill="${config.color}" opacity="0.72" class="bonus-hover-target" data-tooltip="${escapeAttribute(point.details)}"></rect>
         <text x="${pad.left + barWidth + 6}" y="${y + rowHeight * 0.72}" class="chart-value-label">${escapeHtml(formatChartValue(point.value, config.unit))}</text>`;
     }).join("");
     svg.innerHTML = bars + trendLineForBars(shown, config, pad, innerWidth, innerHeight, true);
+    attachBonusTooltips(svg);
     return;
   }
 
@@ -845,9 +906,7 @@ function drawBonusBarChart(svg, config) {
     const y = pad.top + innerHeight - barHeight;
     const shouldLabel = index === 0 || index === shown.length - 1 || point.value === maxValue;
     return `
-      <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="${config.color}" opacity="0.72">
-        <title>${escapeHtml(point.details)}</title>
-      </rect>
+      <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="${config.color}" opacity="0.72" class="bonus-hover-target" data-tooltip="${escapeAttribute(point.details)}"></rect>
       ${shouldLabel ? `<text x="${x + barWidth / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" class="chart-value-label">${escapeHtml(formatChartValue(point.value, config.unit))}</text>` : ""}`;
   }).join("");
   svg.innerHTML = `
@@ -855,6 +914,54 @@ function drawBonusBarChart(svg, config) {
     ${bars}
     ${trendLineForBars(shown, config, pad, innerWidth, innerHeight, false)}
     ${labels}`;
+  attachBonusTooltips(svg);
+}
+
+function drawTeamBreakdownChart(svg, summaries) {
+  const width = 520;
+  const height = 220;
+  const pad = { top: 16, right: 12, bottom: 34, left: 46 };
+  const teams = ["Dominators", "Wizards", "Dodgers", "Rookie", "Retainer"];
+  const colors = {
+    Dominators: "#6c44f7",
+    Wizards: "#c23eff",
+    Dodgers: "#155dff",
+    Rookie: "#45caff",
+    Retainer: "#f7b733"
+  };
+  const shown = summaries.slice(-12);
+  const innerWidth = width - pad.left - pad.right;
+  const innerHeight = height - pad.top - pad.bottom;
+  const gap = 7;
+  const barWidth = (innerWidth - gap * (shown.length - 1)) / shown.length;
+  const maxTotal = Math.max(...shown.map((summary) => Math.max(summary.employeeCount, 1)), 1);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("aria-label", "Month wise team count chart");
+
+  const bars = shown.map((summary, index) => {
+    const x = pad.left + index * (barWidth + gap);
+    let yCursor = pad.top + innerHeight;
+    const segments = teams.map((team) => {
+      const count = summary.teamCounts[team] || 0;
+      if (!count) return "";
+      const segmentHeight = (count / maxTotal) * innerHeight;
+      yCursor -= segmentHeight;
+      return `<rect x="${x}" y="${yCursor}" width="${barWidth}" height="${segmentHeight}" fill="${colors[team]}" class="bonus-hover-target" data-tooltip="${escapeAttribute(`${summary.monthLabel}: ${team} ${count} | CPB ${summary.cpbCount}`)}"></rect>`;
+    }).join("");
+    const shouldLabel = index === shown.length - 1 || index === 0;
+    return `${segments}${shouldLabel ? `<text x="${x + barWidth / 2}" y="${Math.max(12, yCursor - 5)}" text-anchor="middle" class="chart-value-label">${summary.employeeCount}</text>` : ""}`;
+  }).join("");
+  const labels = shown.map((summary, index) => {
+    if (index % Math.ceil(shown.length / 4) !== 0 && index !== shown.length - 1) return "";
+    const x = pad.left + index * (barWidth + gap) + barWidth / 2;
+    return `<text x="${x}" y="${height - 10}" text-anchor="middle" class="chart-label">${escapeHtml(summary.monthLabel)}</text>`;
+  }).join("");
+
+  svg.innerHTML = `
+    <line x1="${pad.left}" y1="${pad.top + innerHeight}" x2="${pad.left + innerWidth}" y2="${pad.top + innerHeight}" class="chart-axis" />
+    ${bars}
+    ${labels}`;
+  attachBonusTooltips(svg);
 }
 
 function trendLineForBars(points, config, pad, innerWidth, innerHeight, horizontal) {
@@ -906,9 +1013,7 @@ function drawEmployeePayableChart(svg, summaries) {
     const h = (point.payable / maxPayable) * innerHeight;
     const x = pad.left + index * (barWidth + gap);
     const y = pad.top + innerHeight - h;
-    return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" fill="#7b55ff" opacity="0.36">
-      <title>${escapeHtml(`${point.monthLabel}: Payable ${formatValue(point.payable, "money")} | Employees ${point.employeeCount}`)}</title>
-    </rect>`;
+    return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" fill="#7b55ff" opacity="0.36" class="bonus-hover-target" data-tooltip="${escapeAttribute(`${point.monthLabel}: Payable ${formatValue(point.payable, "money")} | Employees ${point.employeeCount}`)}"></rect>`;
   }).join("");
   const employeeLine = points.map((point, index) => `${xFor(index)},${yEmployees(point.employeeCount)}`).join(" ");
   const labels = points.map((point, index) => {
@@ -920,12 +1025,37 @@ function drawEmployeePayableChart(svg, summaries) {
     <line x1="${pad.left}" y1="${pad.top + innerHeight}" x2="${pad.left + innerWidth}" y2="${pad.top + innerHeight}" class="chart-axis" />
     ${bars}
     <polyline points="${employeeLine}" class="comparison-line" />
-    <circle cx="${xFor(points.length - 1)}" cy="${yEmployees(latest.employeeCount)}" r="4" fill="#155dff">
-      <title>${escapeHtml(`${latest.monthLabel}: ${latest.employeeCount} employees`)}</title>
-    </circle>
+    <circle cx="${xFor(points.length - 1)}" cy="${yEmployees(latest.employeeCount)}" r="4" fill="#155dff" class="bonus-hover-target" data-tooltip="${escapeAttribute(`${latest.monthLabel}: ${latest.employeeCount} employees`)}"></circle>
     <text x="${width - 78}" y="22" class="chart-label">Bars: Payable</text>
     <text x="${width - 78}" y="40" class="chart-label">Line: Employees</text>
     ${labels}`;
+  attachBonusTooltips(svg);
+}
+
+function attachBonusTooltips(svg) {
+  const tooltip = bonusTooltip();
+  svg.querySelectorAll(".bonus-hover-target").forEach((node) => {
+    node.addEventListener("mousemove", (event) => {
+      tooltip.textContent = node.dataset.tooltip || "";
+      tooltip.classList.add("show");
+      tooltip.style.left = `${event.clientX + 14}px`;
+      tooltip.style.top = `${event.clientY + 14}px`;
+    });
+    node.addEventListener("mouseleave", () => {
+      tooltip.classList.remove("show");
+    });
+  });
+}
+
+function bonusTooltip() {
+  let tooltip = document.querySelector("#bonusTooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "bonusTooltip";
+    tooltip.className = "bonus-tooltip";
+    document.body.append(tooltip);
+  }
+  return tooltip;
 }
 
 function renderSummaryCards(summaries) {
@@ -1757,9 +1887,12 @@ function setEmptyControls() {
 function setBonusEmpty() {
   els.bonusEmployeeInput.value = "Loading employees...";
   els.bonusEmployeeOptions.innerHTML = "";
+  els.bonusStartMonth.innerHTML = "<option>--</option>";
+  els.bonusEndMonth.innerHTML = "<option>--</option>";
   els.bonusSummaryGrid.innerHTML = "";
   els.bonusChartsGrid.innerHTML = "";
-  els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">Loading bonus rows...</td></tr>';
+  els.bonusEmployeeSummaryGrid.innerHTML = "";
+  els.bonusHistoryBody.innerHTML = '<tr><td colspan="9" class="evaluation-empty">Loading bonus rows...</td></tr>';
 }
 
 function renderEmpty() {

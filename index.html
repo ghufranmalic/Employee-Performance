@@ -101,6 +101,16 @@
             <input id="bonusEmployeeInput" list="bonusEmployeeOptions" type="search" autocomplete="off" placeholder="Type username or name" />
             <datalist id="bonusEmployeeOptions"></datalist>
           </label>
+          <div class="range-grid">
+            <label class="field">
+              <span>From</span>
+              <select id="bonusStartMonth"></select>
+            </label>
+            <label class="field">
+              <span>To</span>
+              <select id="bonusEndMonth"></select>
+            </label>
+          </div>
           <label class="toggle-field">
             <input id="bonusTrendToggle" type="checkbox" />
             <span>Show trend line</span>
@@ -234,6 +244,8 @@
               </div>
             </div>
 
+            <section class="summary-grid employee-breakdown-grid" id="bonusEmployeeSummaryGrid"></section>
+
             <div class="evaluation-table-wrap">
               <table class="evaluation-table bonus-table">
                 <thead>
@@ -247,12 +259,11 @@
                     <th>Sales + QA</th>
                     <th>Final Team Bonus</th>
                     <th>Payable</th>
-                    <th>Emp. Status</th>
                   </tr>
                 </thead>
                 <tbody id="bonusHistoryBody">
                   <tr>
-                    <td colspan="10" class="evaluation-empty">Select an employee to begin.</td>
+                    <td colspan="9" class="evaluation-empty">Select an employee to begin.</td>
                   </tr>
                 </tbody>
               </table>
@@ -288,6 +299,6 @@
       </article>
     </template>
 
-    <script type="module" src="./src/app.js?v=20260629-bonus-breakdown"></script>
+    <script type="module" src="./src/app.js?v=20260629-bonus-range-team-tooltip"></script>
   </body>
 </html>
