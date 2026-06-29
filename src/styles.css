@@ -345,6 +345,10 @@ button {
   margin: 24px 0;
 }
 
+#bonusSummaryGrid {
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+}
+
 .metric-card,
 .chart-card,
 .insights {
@@ -395,6 +399,18 @@ button {
   line-height: 1.35;
 }
 
+.bonus-metric-card {
+  min-height: 118px;
+}
+
+.bonus-metric-card strong {
+  font-size: 24px;
+}
+
+.bonus-metric-card small {
+  font-size: 13px;
+}
+
 .insights {
   min-height: 106px;
   padding: 20px;
@@ -441,6 +457,14 @@ button {
 .chart-card {
   min-height: 340px;
   padding: 18px;
+}
+
+.chart-card.wide-chart {
+  grid-column: 1 / -1;
+}
+
+.chart-card.wide-chart .chart-wrap {
+  height: 310px;
 }
 
 .chart-title-row {
@@ -741,6 +765,10 @@ button {
   .charts-grid,
   .insight-list,
   .evaluation-inputs {
+    grid-template-columns: 1fr;
+  }
+
+  #bonusSummaryGrid {
     grid-template-columns: 1fr;
   }
 

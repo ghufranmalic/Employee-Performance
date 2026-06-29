@@ -590,6 +590,31 @@ function formatTeamCounts(teamCounts) {
   return keys.map((team) => `${team}: ${teamCounts[team]}`).join(", ");
 }
 
+function bonusTrendCard(label, summaries, key, unit, color) {
+  const latest = summaries[summaries.length - 1];
+  const previous = summaries[summaries.length - 2];
+  const latestValue = latest ? latest[key] : null;
+  const previousValue = previous ? previous[key] : null;
+  const recent = summaries.slice(-3).map((summary) => summary[key]).filter((value) => Number.isFinite(value));
+  const recentAverage = recent.length ? recent.reduce((sum, value) => sum + value, 0) / recent.length : null;
+  const parts = [];
+
+  if (previous && latestValue !== null && previousValue !== null) {
+    parts.push(`${formatDelta(latestValue - previousValue, unit)} vs ${previous.monthLabel}`);
+  }
+  if (recentAverage !== null && latestValue !== null) {
+    parts.push(`${formatDelta(latestValue - recentAverage, unit)} vs 3-mo avg`);
+  }
+
+  return {
+    label,
+    value: latestValue,
+    unit,
+    detail: parts.join(" | ") || (latest ? `Latest in ${latest.monthLabel}` : "No latest month"),
+    color
+  };
+}
+
 function bonusChartSummary(id, label, unit, color, points) {
   const cleanPoints = points
     .filter((point) => point.value !== null && point.value !== undefined && !Number.isNaN(point.value))
@@ -608,6 +633,7 @@ function bonusChartSummary(id, label, unit, color, points) {
     scoreValue: latest,
     delta,
     rangeLabel: "Latest",
+    labelMode: "key",
     changeText: cleanPoints.length > 1 ? formatDelta(delta, unit) : "No trend"
   };
 }
@@ -677,11 +703,11 @@ function renderBonusDashboard() {
   els.bonusCoverageText.textContent = `Loaded ${summaries.length} month tabs and ${state.bonusEmployees.size} employees. Select an employee for individual breakdown.`;
 
   renderBonusSummaryCards([
-    { label: "Payable", value: latest?.payable ?? null, unit: "money", detail: latest ? `Total in ${latest.monthLabel}` : "No latest month", color: "#7b55ff" },
-    { label: "Sales + QA", value: latest?.salesQa ?? null, unit: "money", detail: latest ? `Total in ${latest.monthLabel}` : "No latest month", color: "#4b8dff" },
-    { label: "Final Team Bonus", value: latest?.finalTeamBonus ?? null, unit: "money", detail: latest ? `Total in ${latest.monthLabel}` : "No latest month", color: "#c23eff" },
-    { label: "Employee Count", value: latest?.employeeCount ?? null, unit: "count", detail: latest ? `# of Employees in ${latest.monthLabel}` : "No latest month", color: "#155dff" },
-    { label: "Team Count", value: latest ? Object.keys(latest.teamCounts).length : null, unit: "count", detail: latest ? formatTeamCounts(latest.teamCounts) : "No latest month", color: "#45caff" },
+    { label: "Latest Month", value: latest?.monthLabel ?? "--", unit: "text", detail: latest ? formatTeamCounts(latest.teamCounts) : "No latest month", color: "#7b55ff" },
+    bonusTrendCard("Payable Trend", summaries, "payable", "money", "#7b55ff"),
+    bonusTrendCard("Sales + QA Trend", summaries, "salesQa", "money", "#4b8dff"),
+    bonusTrendCard("Team Bonus Trend", summaries, "finalTeamBonus", "money", "#c23eff"),
+    bonusTrendCard("Employees", summaries, "employeeCount", "count", "#155dff"),
     { label: "CPB Employees", value: latest ? latest.rows.filter((row) => row.cpb).length : null, unit: "count", detail: latest ? `In ${latest.monthLabel}` : "No latest month", color: "#f7b733" }
   ]);
   renderBonusCharts(summaries);
@@ -707,9 +733,10 @@ function renderBonusSummaryCards(cards) {
   const template = document.querySelector("#metricCardTemplate");
   cards.forEach((card) => {
     const node = template.content.firstElementChild.cloneNode(true);
+    node.classList.add("bonus-metric-card");
     node.querySelector(".metric-dot").style.background = card.color;
     node.querySelector(".metric-head p").textContent = card.label;
-    node.querySelector("strong").textContent = formatValue(card.value, card.unit);
+    node.querySelector("strong").textContent = card.unit === "text" ? card.value : formatValue(card.value, card.unit);
     node.querySelector("small").textContent = card.detail;
     els.bonusSummaryGrid.append(node);
   });
@@ -724,8 +751,9 @@ function renderBonusCharts(monthSummaries) {
     bonusChartSummary("employee-count", "# of Employees", "count", "#155dff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.employeeCount })))
   ];
   const template = document.querySelector("#chartTemplate");
-  summaries.forEach((summary) => {
+  summaries.forEach((summary, index) => {
     const node = template.content.firstElementChild.cloneNode(true);
+    if (index === 0) node.classList.add("wide-chart");
     node.querySelector(".eyebrow").textContent = "Bonus";
     node.querySelector("h4").textContent = summary.tab.label;
     node.querySelector(".trend-pill").textContent = summary.changeText;
@@ -825,6 +853,8 @@ function drawSvgChart(svg, summary) {
   }
 
   const values = points.map((point) => point.value);
+  const minValue = Math.min(...values);
+  const maxPointValue = Math.max(...values);
   const maxValue = summary.tab.unit === "percent" ? Math.max(100, ...values) : Math.max(...values, 1);
   const yMax = Math.ceil(maxValue / 10) * 10;
   const xFor = (index) => pad.left + (points.length === 1 ? innerWidth / 2 : (index / (points.length - 1)) * innerWidth);
@@ -848,6 +878,7 @@ function drawSvgChart(svg, summary) {
       <title>${escapeHtml(point.label)}: ${escapeHtml(formatValue(point.value, summary.tab.unit))}</title>
     </circle>`).join("");
   const valueLabels = points.map((point, index) => {
+    if (!shouldShowValueLabel(summary, point, index, points, minValue, maxPointValue)) return "";
     const y = Math.max(12, yFor(point.value) - 10 - ((index % 2) * 9));
     return `<text x="${xFor(index)}" y="${y}" text-anchor="middle" class="chart-value-label">${escapeHtml(formatChartValue(point.value, summary.tab.unit))}</text>`;
   }).join("");
@@ -860,6 +891,12 @@ function drawSvgChart(svg, summary) {
     ${circles}
     ${valueLabels}
     ${labels}`;
+}
+
+function shouldShowValueLabel(summary, point, index, points, minValue, maxValue) {
+  if (summary.labelMode !== "key") return true;
+  if (index === 0 || index === points.length - 1) return true;
+  return point.value === minValue || point.value === maxValue;
 }
 
 function summarizeKpi(tab, username, range) {
