@@ -91,6 +91,7 @@ const els = {
   bonusSummaryGrid: document.querySelector("#bonusSummaryGrid"),
   bonusCoverageText: document.querySelector("#bonusCoverageText"),
   bonusChartsGrid: document.querySelector("#bonusChartsGrid"),
+  bonusHistoryTitle: document.querySelector("#bonusHistoryTitle"),
   bonusHistoryBody: document.querySelector("#bonusHistoryBody")
 };
 
@@ -542,8 +543,8 @@ function buildBonusEmployeeOptions() {
     els.bonusEmployeeOptions.append(option);
   });
 
-  state.selectedBonusUser = employees[0] ? normalizeUser(employees[0].username) : "";
-  els.bonusEmployeeInput.value = employees[0] ? employees[0].username : "";
+  state.selectedBonusUser = "";
+  els.bonusEmployeeInput.value = "";
 }
 
 function bonusRowsForEmployee(username) {
@@ -552,13 +553,41 @@ function bonusRowsForEmployee(username) {
     .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 }
 
-function bonusTeamCountPoints() {
+function bonusMonthSummaries() {
   return state.bonusMonths.map((month) => {
-    const usernames = new Set(state.bonusRows
-      .filter((row) => row.monthKey === month.key && (!row.status || !normalizeHeader(row.status).includes("resigned")))
-      .map((row) => row.username));
-    return { month: month.key, label: month.label, value: usernames.size };
-  }).filter((point) => point.value);
+    const rows = state.bonusRows.filter((row) => row.monthKey === month.key);
+    const activeRows = rows.filter((row) => !row.status || !normalizeHeader(row.status).includes("resigned"));
+    const teamCounts = {};
+    activeRows.forEach((row) => {
+      const team = row.team || "No Team";
+      teamCounts[team] = (teamCounts[team] || 0) + 1;
+    });
+
+    return {
+      monthKey: month.key,
+      monthLabel: month.label,
+      rows,
+      activeRows,
+      payable: sumRows(rows, "payable"),
+      salesQa: sumRows(rows, "salesQa"),
+      finalTeamBonus: sumRows(rows, "finalTeamBonus"),
+      employeeCount: activeRows.length,
+      teamCounts
+    };
+  }).filter((summary) => summary.rows.length);
+}
+
+function sumRows(rows, key) {
+  return rows.reduce((sum, row) => sum + valueOrZero(row[key]), 0);
+}
+
+function formatTeamCounts(teamCounts) {
+  const preferred = ["Dominators", "Wizards", "Dodgers", "Rookie"];
+  const keys = [
+    ...preferred.filter((team) => teamCounts[team]),
+    ...Object.keys(teamCounts).filter((team) => !preferred.includes(team)).sort()
+  ];
+  return keys.map((team) => `${team}: ${teamCounts[team]}`).join(", ");
 }
 
 function bonusChartSummary(id, label, unit, color, points) {
@@ -636,37 +665,32 @@ function renderBonusDashboard() {
     return;
   }
 
-  const employee = state.bonusEmployees.get(state.selectedBonusUser) || [...state.bonusEmployees.values()][0];
-  if (!employee) {
-    renderBonusEmpty("No bonus employees found.");
-    return;
-  }
+  const summaries = bonusMonthSummaries();
+  const latest = summaries[summaries.length - 1];
+  const selectedEmployee = state.selectedBonusUser ? state.bonusEmployees.get(state.selectedBonusUser) : null;
 
-  state.selectedBonusUser = normalizeUser(employee.username);
-  els.bonusEmployeeInput.value = employee.username;
-  const rows = bonusRowsForEmployee(state.selectedBonusUser);
-  const latest = rows[rows.length - 1];
-  const totalPayable = rows.reduce((sum, row) => sum + valueOrZero(row.payable), 0);
-  const cpbMonths = rows.filter((row) => row.cpb).length;
-  const teams = [...new Set(rows.map((row) => row.team).filter(Boolean))];
-
-  els.bonusEmployeeName.textContent = employee.name || employee.username;
+  els.bonusEmployeeName.textContent = "Bonus Breakdown";
   els.bonusEmployeeMeta.textContent = latest
-    ? `Username: ${employee.username} | Latest Team: ${latest.team || "--"} | Months: ${rows.length}`
-    : "No monthly rows for this employee.";
+    ? `Latest month: ${latest.monthLabel} | ${formatTeamCounts(latest.teamCounts)}`
+    : "No monthly bonus rows found.";
   els.bonusPayableValue.textContent = latest ? formatValue(latest.payable, "money") : "--";
-  els.bonusCoverageText.textContent = `Loaded ${state.bonusMonths.length} month tabs and ${state.bonusEmployees.size} employees.`;
+  els.bonusCoverageText.textContent = `Loaded ${summaries.length} month tabs and ${state.bonusEmployees.size} employees. Select an employee for individual breakdown.`;
 
   renderBonusSummaryCards([
-    { label: "Total Payable", value: totalPayable, unit: "money", detail: `Across ${rows.length} months`, color: "#7b55ff" },
-    { label: "Latest Total OFFs", value: latest?.totalOffs ?? null, unit: "count", detail: latest ? latest.monthLabel : "No latest row", color: "#155dff" },
-    { label: "Latest Sales + QA", value: latest?.salesQa ?? null, unit: "money", detail: latest ? latest.monthLabel : "No latest row", color: "#4b8dff" },
-    { label: "Latest Team Bonus", value: latest?.finalTeamBonus ?? null, unit: "money", detail: latest ? latest.monthLabel : "No latest row", color: "#c23eff" },
-    { label: "CPB Months", value: cpbMonths, unit: "count", detail: "Consistence Performance Bonus", color: "#f7b733" },
-    { label: "Teams", value: teams.length, unit: "count", detail: teams.join(", ") || "No team history", color: "#45caff" }
+    { label: "Payable", value: latest?.payable ?? null, unit: "money", detail: latest ? `Total in ${latest.monthLabel}` : "No latest month", color: "#7b55ff" },
+    { label: "Sales + QA", value: latest?.salesQa ?? null, unit: "money", detail: latest ? `Total in ${latest.monthLabel}` : "No latest month", color: "#4b8dff" },
+    { label: "Final Team Bonus", value: latest?.finalTeamBonus ?? null, unit: "money", detail: latest ? `Total in ${latest.monthLabel}` : "No latest month", color: "#c23eff" },
+    { label: "Employee Count", value: latest?.employeeCount ?? null, unit: "count", detail: latest ? `# of Employees in ${latest.monthLabel}` : "No latest month", color: "#155dff" },
+    { label: "Team Count", value: latest ? Object.keys(latest.teamCounts).length : null, unit: "count", detail: latest ? formatTeamCounts(latest.teamCounts) : "No latest month", color: "#45caff" },
+    { label: "CPB Employees", value: latest ? latest.rows.filter((row) => row.cpb).length : null, unit: "count", detail: latest ? `In ${latest.monthLabel}` : "No latest month", color: "#f7b733" }
   ]);
-  renderBonusCharts(rows);
-  renderBonusHistory(rows);
+  renderBonusCharts(summaries);
+
+  if (selectedEmployee) {
+    renderBonusHistory(bonusRowsForEmployee(state.selectedBonusUser), selectedEmployee);
+  } else {
+    renderBonusHistory([], null);
+  }
 }
 
 function renderBonusEmpty(message) {
@@ -691,13 +715,13 @@ function renderBonusSummaryCards(cards) {
   });
 }
 
-function renderBonusCharts(employeeRows) {
+function renderBonusCharts(monthSummaries) {
   els.bonusChartsGrid.innerHTML = "";
   const summaries = [
-    bonusChartSummary("payable", "Payable", "money", "#7b55ff", employeeRows.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.payable }))),
-    bonusChartSummary("team-count", "Total Team Count", "count", "#155dff", bonusTeamCountPoints()),
-    bonusChartSummary("offs", "Total OFFs", "count", "#c23eff", employeeRows.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.totalOffs }))),
-    bonusChartSummary("sales-qa", "Sales + QA", "money", "#4b8dff", employeeRows.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.salesQa })))
+    bonusChartSummary("payable", "Total Payable", "money", "#7b55ff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.payable }))),
+    bonusChartSummary("sales-qa", "Total Sales + QA", "money", "#4b8dff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.salesQa }))),
+    bonusChartSummary("team-bonus", "Total Final Team Bonus", "money", "#c23eff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.finalTeamBonus }))),
+    bonusChartSummary("employee-count", "# of Employees", "count", "#155dff", monthSummaries.map((row) => ({ month: row.monthKey, label: row.monthLabel, value: row.employeeCount })))
   ];
   const template = document.querySelector("#chartTemplate");
   summaries.forEach((summary) => {
@@ -711,11 +735,14 @@ function renderBonusCharts(employeeRows) {
   });
 }
 
-function renderBonusHistory(rows) {
+function renderBonusHistory(rows, employee) {
   if (!rows.length) {
-    els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">No rows for this employee.</td></tr>';
+    els.bonusHistoryTitle.textContent = "Employee bonus history";
+    els.bonusHistoryBody.innerHTML = '<tr><td colspan="10" class="evaluation-empty">Select an employee to see individual bonus history.</td></tr>';
     return;
   }
+
+  els.bonusHistoryTitle.textContent = `Employee bonus history: ${employee.name || employee.username}`;
 
   els.bonusHistoryBody.innerHTML = [...rows].reverse().map((row) => `
     <tr>
