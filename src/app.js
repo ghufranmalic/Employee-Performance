@@ -858,7 +858,8 @@ function renderBonusEmployeeSummary(rows) {
 }
 
 function drawBonusBarChart(svg, config) {
-  const width = 520;
+  const pointCount = Math.max(config.points.length, 1);
+  const width = config.orientation === "horizontal" ? 560 : Math.max(520, pointCount * 44);
   const height = 220;
   const pad = config.orientation === "horizontal"
     ? { top: 18, right: 78, bottom: 18, left: 88 }
@@ -872,7 +873,7 @@ function drawBonusBarChart(svg, config) {
     return;
   }
 
-  const shown = points.slice(-12);
+  const shown = points;
   const maxValue = Math.max(...shown.map((point) => point.value), 1);
   const innerWidth = width - pad.left - pad.right;
   const innerHeight = height - pad.top - pad.bottom;
@@ -896,7 +897,6 @@ function drawBonusBarChart(svg, config) {
   const gap = 7;
   const barWidth = (innerWidth - gap * (shown.length - 1)) / shown.length;
   const labels = shown.map((point, index) => {
-    if (index % Math.ceil(shown.length / 4) !== 0 && index !== shown.length - 1) return "";
     const x = pad.left + index * (barWidth + gap) + barWidth / 2;
     return `<text x="${x}" y="${height - 12}" text-anchor="middle" class="chart-label">${escapeHtml(point.label)}</text>`;
   }).join("");
@@ -904,10 +904,9 @@ function drawBonusBarChart(svg, config) {
     const barHeight = (point.value / maxValue) * innerHeight;
     const x = pad.left + index * (barWidth + gap);
     const y = pad.top + innerHeight - barHeight;
-    const shouldLabel = index === 0 || index === shown.length - 1 || point.value === maxValue;
     return `
       <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="${config.color}" opacity="0.72" class="bonus-hover-target" data-tooltip="${escapeAttribute(point.details)}"></rect>
-      ${shouldLabel ? `<text x="${x + barWidth / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" class="chart-value-label">${escapeHtml(formatChartValue(point.value, config.unit))}</text>` : ""}`;
+      <text x="${x + barWidth / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" class="chart-value-label">${escapeHtml(formatChartValue(point.value, config.unit))}</text>`;
   }).join("");
   svg.innerHTML = `
     <line x1="${pad.left}" y1="${pad.top + innerHeight}" x2="${pad.left + innerWidth}" y2="${pad.top + innerHeight}" class="chart-axis" />
@@ -918,7 +917,7 @@ function drawBonusBarChart(svg, config) {
 }
 
 function drawTeamBreakdownChart(svg, summaries) {
-  const width = 520;
+  const width = Math.max(520, summaries.length * 44);
   const height = 220;
   const pad = { top: 16, right: 12, bottom: 34, left: 46 };
   const teams = ["Dominators", "Wizards", "Dodgers", "Rookie", "Retainer"];
@@ -929,7 +928,7 @@ function drawTeamBreakdownChart(svg, summaries) {
     Rookie: "#45caff",
     Retainer: "#f7b733"
   };
-  const shown = summaries.slice(-12);
+  const shown = summaries;
   const innerWidth = width - pad.left - pad.right;
   const innerHeight = height - pad.top - pad.bottom;
   const gap = 7;
@@ -948,11 +947,9 @@ function drawTeamBreakdownChart(svg, summaries) {
       yCursor -= segmentHeight;
       return `<rect x="${x}" y="${yCursor}" width="${barWidth}" height="${segmentHeight}" fill="${colors[team]}" class="bonus-hover-target" data-tooltip="${escapeAttribute(`${summary.monthLabel}: ${team} ${count} | CPB ${summary.cpbCount}`)}"></rect>`;
     }).join("");
-    const shouldLabel = index === shown.length - 1 || index === 0;
-    return `${segments}${shouldLabel ? `<text x="${x + barWidth / 2}" y="${Math.max(12, yCursor - 5)}" text-anchor="middle" class="chart-value-label">${summary.employeeCount}</text>` : ""}`;
+    return `${segments}<text x="${x + barWidth / 2}" y="${Math.max(12, yCursor - 5)}" text-anchor="middle" class="chart-value-label">${summary.employeeCount}</text>`;
   }).join("");
   const labels = shown.map((summary, index) => {
-    if (index % Math.ceil(shown.length / 4) !== 0 && index !== shown.length - 1) return "";
     const x = pad.left + index * (barWidth + gap) + barWidth / 2;
     return `<text x="${x}" y="${height - 10}" text-anchor="middle" class="chart-label">${escapeHtml(summary.monthLabel)}</text>`;
   }).join("");

@@ -443,11 +443,13 @@ button {
 
 .bonus-tile-body {
   min-height: 220px;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .bonus-tile-body svg {
   display: block;
-  width: 100%;
+  min-width: 100%;
   height: 100%;
 }
 
