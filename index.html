@@ -45,7 +45,7 @@
         </nav>
 
         <form id="controls" class="controls page-controls">
-          <label class="field">
+          <label class="field hidden-url-field">
             <span>Google Sheet URL</span>
             <input id="sheetUrl" type="url" autocomplete="off" />
           </label>
@@ -88,7 +88,7 @@
         </form>
 
         <form id="bonusControls" class="controls page-controls auth-hidden">
-          <label class="field">
+          <label class="field hidden-url-field">
             <span>Bonus Sheet URL</span>
             <input id="bonusSheetUrl" type="url" autocomplete="off" />
           </label>
@@ -126,6 +126,15 @@
         <div id="statusPanel" class="status-panel">
           <p class="status-title">Ready</p>
           <p id="statusText">Paste a Sheet URL or use the default Employee Performance Profile sheet.</p>
+          <div id="progressPanel" class="progress-panel auth-hidden" aria-live="polite">
+            <div class="progress-row">
+              <span id="progressLabel">Loading</span>
+              <span id="progressText">0%</span>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+              <div id="progressBar" class="progress-bar"></div>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -305,6 +314,6 @@
       </article>
     </template>
 
-    <script type="module" src="./src/app.js?v=20260629-team-history-size-labels"></script>
+    <script type="module" src="./src/app.js?v=20260630-loading-progress"></script>
   </body>
 </html>

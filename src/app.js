@@ -63,6 +63,10 @@ const els = {
   endMonth: document.querySelector("#endMonth"),
   statusText: document.querySelector("#statusText"),
   statusTitle: document.querySelector(".status-title"),
+  progressPanel: document.querySelector("#progressPanel"),
+  progressLabel: document.querySelector("#progressLabel"),
+  progressText: document.querySelector("#progressText"),
+  progressBar: document.querySelector("#progressBar"),
   employeeName: document.querySelector("#employeeName"),
   employeeMeta: document.querySelector("#employeeMeta"),
   scoreValue: document.querySelector("#scoreValue"),
@@ -116,12 +120,12 @@ els.bonusNav.addEventListener("click", () => showPage("bonus"));
 
 els.controls.addEventListener("submit", (event) => {
   event.preventDefault();
-  loadSheet(els.sheetUrl.value.trim());
+  loadSheet(els.sheetUrl.value.trim() || DEFAULT_SHEET_URL);
 });
 
 els.bonusControls.addEventListener("submit", (event) => {
   event.preventDefault();
-  loadBonusSheet(els.bonusSheetUrl.value.trim());
+  loadBonusSheet(els.bonusSheetUrl.value.trim() || BONUS_SHEET_URL);
 });
 
 els.bonusEmployeeInput.addEventListener("change", selectTypedBonusEmployee);
@@ -287,6 +291,7 @@ async function loadSheet(url) {
   }
 
   setStatus("Loading", "Reading KPI tabs from Google Sheets...");
+  startProgress("Loading performance data");
   els.loadBtn.disabled = true;
   state.sheetId = sheetId;
   state.kpis.clear();
@@ -296,9 +301,18 @@ async function loadSheet(url) {
   state.diagnostics = [];
 
   try {
-    await Promise.all(KPI_TABS.map((tab) => loadKpiTab(sheetId, tab)));
+    const totalSteps = KPI_TABS.length + 2;
+    let completedSteps = 0;
+    const markStep = (label) => {
+      completedSteps += 1;
+      updateProgress(completedSteps, totalSteps, label);
+    };
+
+    await Promise.all(KPI_TABS.map((tab) => loadKpiTab(sheetId, tab).finally(() => markStep(tab.label))));
     await loadEmployeeMeta(sheetId);
+    markStep("Employee list");
     await loadTeamMeta(sheetId);
+    markStep("Teams");
     buildEmployeeOptions();
     buildMonthOptions();
     initializeEvaluationInputs();
@@ -307,8 +321,10 @@ async function loadSheet(url) {
     renderAnnualEvaluation();
     const warnings = state.diagnostics.length ? ` ${state.diagnostics.join(" ")}` : "";
     setStatus("Loaded", `Found ${state.employees.size} employees and ${state.months.length} month columns.${warnings}`);
+    finishProgress();
   } catch (error) {
     setStatus("Load failed", friendlyError(error));
+    hideProgress();
   } finally {
     els.loadBtn.disabled = false;
   }
@@ -342,22 +358,34 @@ async function loadBonusSheet(url) {
   }
 
   setStatus("Loading bonus", "Reading month tabs from the bonus sheet...");
+  startProgress("Loading bonus data");
   els.bonusLoadBtn.disabled = true;
   state.bonusRows = [];
   state.bonusMonths = [];
   state.bonusEmployees.clear();
 
-  const tabs = bonusMonthTabs();
-  const results = await Promise.allSettled(tabs.map((tab) => loadBonusMonthTab(sheetId, tab)));
-  const loaded = results.filter((result) => result.status === "fulfilled" && result.value.length).flatMap((result) => result.value);
-  state.bonusRows = trimTrailingDuplicateBonusMonths(loaded).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  state.bonusMonths = [...new Map(state.bonusRows.map((row) => [row.monthKey, { key: row.monthKey, label: row.monthLabel }])).values()]
-    .sort((a, b) => a.key.localeCompare(b.key));
-  buildBonusEmployeeOptions();
-  buildBonusMonthOptions();
-  renderBonusDashboard();
-  setStatus("Bonus loaded", `Loaded ${state.bonusRows.length.toLocaleString("en-US")} bonus rows across ${state.bonusMonths.length} month tabs.`);
-  els.bonusLoadBtn.disabled = false;
+  try {
+    const tabs = bonusMonthTabs();
+    let completedSteps = 0;
+    const results = await Promise.allSettled(tabs.map((tab) => loadBonusMonthTab(sheetId, tab).finally(() => {
+      completedSteps += 1;
+      updateProgress(completedSteps, tabs.length, tab.label);
+    })));
+    const loaded = results.filter((result) => result.status === "fulfilled" && result.value.length).flatMap((result) => result.value);
+    state.bonusRows = trimTrailingDuplicateBonusMonths(loaded).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+    state.bonusMonths = [...new Map(state.bonusRows.map((row) => [row.monthKey, { key: row.monthKey, label: row.monthLabel }])).values()]
+      .sort((a, b) => a.key.localeCompare(b.key));
+    buildBonusEmployeeOptions();
+    buildBonusMonthOptions();
+    renderBonusDashboard();
+    setStatus("Bonus loaded", `Loaded ${state.bonusRows.length.toLocaleString("en-US")} bonus rows across ${state.bonusMonths.length} month tabs.`);
+    finishProgress();
+  } catch (error) {
+    setStatus("Bonus load failed", friendlyError(error));
+    hideProgress();
+  } finally {
+    els.bonusLoadBtn.disabled = false;
+  }
 }
 
 async function loadBonusMonthTab(sheetId, tab) {
@@ -2043,6 +2071,29 @@ function renderEmpty() {
 function setStatus(title, text) {
   els.statusTitle.textContent = title;
   els.statusText.textContent = text;
+}
+
+function startProgress(label) {
+  updateProgress(0, 1, label);
+  els.progressPanel.classList.remove("auth-hidden");
+}
+
+function updateProgress(completed, total, label) {
+  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  els.progressLabel.textContent = label || "Loading";
+  els.progressText.textContent = `${clamp(percent, 0, 100)}%`;
+  els.progressBar.style.width = `${clamp(percent, 0, 100)}%`;
+}
+
+function finishProgress() {
+  updateProgress(1, 1, "Complete");
+  window.setTimeout(hideProgress, 700);
+}
+
+function hideProgress() {
+  els.progressPanel.classList.add("auth-hidden");
+  els.progressBar.style.width = "0%";
+  els.progressText.textContent = "0%";
 }
 
 function friendlyError(error) {

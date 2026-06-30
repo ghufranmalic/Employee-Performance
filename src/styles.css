@@ -183,6 +183,10 @@ button {
   gap: 7px;
 }
 
+.hidden-url-field {
+  display: none;
+}
+
 .field span {
   color: var(--muted);
   font-size: 12px;
@@ -301,6 +305,41 @@ button {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.progress-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.progress-row span:last-child {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef3f6;
+}
+
+.progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--purple);
+  transition: width 180ms ease;
 }
 
 .workspace {
